@@ -72,6 +72,7 @@
             scene_offset_y: 0.,
             scene_speed_x: 0.5,
             scene_speed_y: 0.,
+            scene_portal_type: 0.,
         };
 
         const guidata = {
@@ -325,7 +326,7 @@
             const circle1Material = new THREE.MeshBasicMaterial({ 
                 color: guidata.circle1Color,
                 transparent: true,
-                opacity: 0.3,
+                opacity: 0.2,
                 side: THREE.DoubleSide
             });
             circle1Object = new THREE.Mesh(circle1Geometry, circle1Material);
@@ -336,14 +337,14 @@
             const circle2Material = new THREE.MeshBasicMaterial({ 
                 color: guidata.circle2Color,
                 transparent: true,
-                opacity: 0.3,
+                opacity: 0.2,
                 side: THREE.DoubleSide
             });
             circle2Object = new THREE.Mesh(circle2Geometry, circle2Material);
             scene.add(circle2Object);
 
             // Also create wireframe versions for better visibility
-            const wireframe1Material = new THREE.RingGeometry(0.98, 1.02, circleLines);
+            const wireframe1Material = new THREE.RingGeometry(0.99, 1.01, circleLines);
             const wireframe1Mesh = new THREE.Mesh(wireframe1Material, new THREE.MeshBasicMaterial({ 
                 color: guidata.circle1Color, 
                 transparent: true, 
@@ -351,7 +352,7 @@
             }));
             circle1Object.add(wireframe1Mesh);
 
-            const wireframe2Material = new THREE.RingGeometry(0.98, 1.02, circleLines);
+            const wireframe2Material = new THREE.RingGeometry(0.99, 1.01, circleLines);
             const wireframe2Mesh = new THREE.Mesh(wireframe2Material, new THREE.MeshBasicMaterial({ 
                 color: guidata.circle2Color, 
                 transparent: true, 
@@ -511,30 +512,34 @@
                 const value = constants[name];
 
                 // Different ranges based on parameter
-                let min, max, step;
+                let min, max, step, label;
 
                 let clamps = {
-                    "iterations": [1, 30, 1],
-                    "edgeSpringConstant": [0, 1000, 1],
-                    "dt": [0.0001, 0.1, 0.0001],
-                    "dampingCoefficient": [0, 50, 0.1],
+                    "iterations": [1, 30, 1, "Iters"],
+                    "edgeSpringConstant": [0, 1000, 1, "Spring force"],
+                    "dt": [0.0001, 0.1, 0.0001, "Δt"],
+                    "dampingCoefficient": [0, 50, 0.1, "Spring damping"],
+                    "globalDamping": [0, 5, 0.01, "Speed damping"],
 
-                    "scene_size": [0, 120, 1],
-                    "scene_scale": [0.01, 10., 0.01],
-                    "scene_offset_x": [-5, 5, 0.01],
-                    "scene_offset_y": [-5, 5, 0.01],
-                    "scene_speed_x": [-5, 5, 0.01],
-                    "scene_speed_y": [-5, 5, 0.01],
+                    "scene_size": [0, 120, 1, "Grid size"],
+                    "scene_scale": [0.01, 10., 0.01, "Scale"],
+                    "scene_offset_x": [-5, 5, 0.01, "Offset.x"],
+                    "scene_offset_y": [-5, 5, 0.01, "Offset.y"],
+                    "scene_speed_x": [-5, 5, 0.01, "Speed.x"],
+                    "scene_speed_y": [-5, 5, 0.01, "Speed.y"],
+                    "scene_portal_type": [0, 2, 1, "Portal type"]
                 };
 
                 if (name in clamps) {
                     min = clamps[name][0];
                     max = clamps[name][1];
                     step = clamps[name][2];
+                    label = clamps[name][3];
                 } else {
                     min = 0;
                     max = 5;
                     step = 0.01;
+                    label = name;
                 }
 
                 if (name.startsWith("scene_")) {
@@ -542,14 +547,14 @@
                         meshHandle.set_constant(name, value);
 
                         updateVisualization();
-                    });
+                    }).name(label);
                 } else {
                     physicsFolder.add(constants, name, min, max, step).onChange(value => {
                         if (name !== "iterations") {
                             // Forward the change to WASM
                             meshHandle.set_constant(name, value);
                         }
-                    });
+                    }).name(label);
                 }
             }
             physicsFolder.open();
