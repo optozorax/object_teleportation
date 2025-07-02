@@ -16,7 +16,7 @@ pub struct Particle {
     pub position: Vector2,
     pub velocity: Vector2,
     pub force: Vector2,
-    pub teleported: bool,
+    pub degree: i8,
 }
 
 impl Particle {
@@ -25,7 +25,7 @@ impl Particle {
             position: Vector2::new(x, y),
             velocity: Vector2::new(0.0, 0.0),
             force: Vector2::new(0.0, 0.0),
-            teleported: false,
+            degree: 0,
         }
     }
 }
@@ -55,30 +55,6 @@ struct Portals {
 
     a_inv: Matrix3,
     b_inv: Matrix3,
-}
-
-#[derive(Clone, Debug, Copy, PartialEq)]
-enum TeleportDirection {
-    A2B,
-    B2A,
-}
-
-impl TeleportDirection {
-    fn from_bool(val: bool) -> TeleportDirection {
-        use TeleportDirection::*;
-        match val {
-            false => B2A,
-            true => A2B,
-        }
-    }
-
-    fn inv(self) -> Self {
-        use TeleportDirection::*;
-        match self {
-            A2B => B2A,
-            B2A => A2B,
-        }
-    }
 }
 
 fn is_intersects_unit_circle(a: Vector2, b: Vector2) -> bool {
@@ -183,12 +159,18 @@ mod tests {
 fn reflect_around_unit_circle(pos: Vector2) -> Vector2 {
     let normal = pos.normalize();
     let len = pos.length();
+    if len == 0. {
+        return pos;
+    }
     normal * 1. / len
 }
 
 fn reflect_direction_around_unit_circle(pos: Vector2, dir: Vector2) -> Vector2 {
     let r2 = pos.length_squared();
-    debug_assert!(r2 > 0.0, "Direction reflection undefined at the origin");
+    if r2 == 0. {
+        return dir;
+    }
+    // debug_assert!(r2 > 0.0, "Direction reflection undefined at the origin");
 
     let numerator = dir * r2 - pos * (2.0 * pos.dot(dir));
     let reflected = numerator / (r2 * r2);
@@ -223,48 +205,72 @@ impl Portals {
         (self.b * Vector3::new(1., 0., 0.)).length()
     }
 
-    fn teleport_position(&self, pos: Vector2, teleport_direction: TeleportDirection) -> Vector2 {
-        let mut vec = Vector3::from((pos, 1.));
-        if teleport_direction == TeleportDirection::A2B {
-            vec = self.a_inv * vec;
-            vec = Vector3::from((reflect_around_unit_circle(vec.xy()), vec.z));
-            vec = self.b * vec;
-            vec.xy()
-        } else {
-            vec = self.b_inv * vec;
-            vec = Vector3::from((reflect_around_unit_circle(vec.xy()), vec.z));
-            vec = self.a * vec;
-            vec.xy()
+    fn teleport_position(&self, pos: Vector2, mut degree: i8) -> Vector2 {
+        let mut pos = Vector3::from((pos, 1.));
+        if degree.abs() > 1 {
+            panic!("why degree {degree}?");
         }
+        loop {
+            if degree == 0 {
+                break;
+            } else if degree > 0 {
+                degree -= 1;
+                pos = self.a_inv * pos;
+                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                pos = self.b * pos;
+            } else if degree < 0 {
+                degree += 1;
+                pos = self.b_inv * pos;
+                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                pos = self.a * pos;
+            }
+        }
+        pos.xy()
     }
 
-    fn teleport_direction(&self, pos: Vector2, dir: Vector2, teleport_direction: TeleportDirection) -> Vector2 {
+    fn teleport_direction(&self, pos: Vector2, dir: Vector2, mut degree: i8) -> Vector2 {
         let mut pos = Vector3::from((pos, 1.));
         let mut dir = Vector3::from((dir, 0.));
-        let res = if teleport_direction == TeleportDirection::A2B {
-            pos = self.a_inv * pos;
-            dir = self.a_inv * dir;
-            dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
-            dir = self.b * dir;
-            dir.xy()
-        } else {
-            pos = self.b_inv * pos;
-            dir = self.b_inv * dir;
-            dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
-            dir = self.a * dir;
-            dir.xy()
-        };
-        res
+        if degree.abs() > 1 {
+            panic!("why degree {degree}?");
+        }
+        loop {
+            if degree == 0 {
+                break;
+            } else if degree > 0 {
+                degree -= 1;
+
+                pos = self.a_inv * pos;
+                dir = self.a_inv * dir;
+
+                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+
+                pos = self.b * pos;
+                dir = self.b * dir;
+            } else if degree < 0 {
+                degree += 1;
+
+                pos = self.b_inv * pos;
+                dir = self.b_inv * dir;
+
+                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+
+                pos = self.a * pos;
+                dir = self.a * dir;
+            }
+        }
+        dir.xy()
     }
 
-    fn is_intersect(&self, prev_pos: Vector2, new_pos: Vector2) -> Option<TeleportDirection> {
-        use TeleportDirection::*;
+    fn is_intersect(&self, prev_pos: Vector2, new_pos: Vector2) -> Option<i8> {
         let prev_pos: Vector3 = (prev_pos, 1.0).into();
         let new_pos: Vector3 = (new_pos, 1.0).into();
         if is_intersects_unit_circle((self.a_inv * prev_pos).xy(), (self.a_inv * new_pos).xy()) {
-            Some(A2B)
+            Some(1)
         } else if is_intersects_unit_circle((self.b_inv * prev_pos).xy(), (self.b_inv * new_pos).xy()) {
-            Some(B2A)
+            Some(-1)
         } else {
             None
         }
@@ -272,14 +278,9 @@ impl Portals {
 
     fn move_particle(&self, particle: &mut Particle, offset: Vector2) {
         if let Some(dir) = self.is_intersect(particle.position, particle.position + offset) {
-            use TeleportDirection::*;
             particle.velocity = self.teleport_direction(particle.position + offset, particle.velocity, dir);
             particle.position = self.teleport_position(particle.position + offset, dir);
-            if dir == A2B {
-                particle.teleported = true;
-            } else {
-                particle.teleported = false;
-            }
+            particle.degree += dir;
         } else {
             particle.position += offset;
         }
@@ -302,10 +303,10 @@ fn spring_force(
     let delta = pos2 - pos1;
     let current_length = delta.length();
 
-    if current_length > 0.5 {
-        // dbg!(pos1, pos2, speed1, speed2, rest_length, current_length);
-        // panic!()
-        return Vector2::ZERO;
+    if current_length > rest_length * 4. {
+        dbg!(pos1, pos2, speed1, speed2, rest_length, current_length);
+        panic!()
+        // return Vector2::ZERO;
     }
 
     if current_length == 0.0 {
@@ -319,6 +320,10 @@ fn spring_force(
     let spring_force = edge_k * (current_length - rest_length);
     let damping_force = damping * relative_velocity;
     let total_force = spring_force + damping_force;
+
+    if total_force.is_nan() {
+        panic!("NAN!!!!");
+    }
 
     let force_vector = direction * total_force;
 
@@ -344,29 +349,34 @@ fn calc_forces(
         let p1 = &particles[spring.i];
         let p2 = &particles[spring.j];
 
-        if p1.teleported != p2.teleported {
+        if p1.degree != p2.degree {
+            // in p1 local coordinates
             let force1 = spring_force(
                 p1.position,
-                portals.teleport_position(p2.position, TeleportDirection::from_bool(p2.teleported).inv()),
+                portals.teleport_position(p2.position, p1.degree - p2.degree),
                 p1.velocity,
-                portals.teleport_direction(p2.position, p2.velocity, TeleportDirection::from_bool(p2.teleported).inv()),
+                portals.teleport_direction(p2.position, p2.velocity, p1.degree - p2.degree),
                 spring.rest_length,
                 edge_k,
                 damping
             );
 
+            // in p2 local coordinates
             let force2 = spring_force(
-                portals.teleport_position(p1.position, TeleportDirection::from_bool(p1.teleported).inv()),
+                portals.teleport_position(p1.position, p2.degree - p1.degree),
                 p2.position,
-                portals.teleport_direction(p1.position, p1.velocity, TeleportDirection::from_bool(p1.teleported).inv()),
+                portals.teleport_direction(p1.position, p1.velocity, p2.degree - p1.degree),
                 p2.velocity,
                 spring.rest_length,
                 edge_k,
                 damping
             );
 
-            particles[spring.i].force += force1;
-            particles[spring.j].force -= force2;
+            let force1_avg = (force1 + portals.teleport_direction(p2.position, force2, p1.degree - p2.degree)) / 2.;
+            let force2_avg = (force2 + portals.teleport_direction(p1.position, force1, p2.degree - p1.degree)) / 2.;
+
+            particles[spring.i].force += force1_avg;
+            particles[spring.j].force -= force2_avg;
         } else {
             let force_vector = spring_force(p1.position, p2.position, p1.velocity, p2.velocity, spring.rest_length, edge_k, damping);
 
@@ -386,14 +396,19 @@ pub struct Mesh {
     particles: Vec<Particle>,
     springs: Vec<EdgeSpring>,
     portals: Portals,
-    sizex: usize,
-    sizey: usize,
+    size: usize,
 
     // Simulation constants
     dt: fxx,
     edge_spring_constant: fxx,
     damping_coefficient: fxx,
     global_damping: fxx,
+
+    scale: fxx,
+    offset_x: fxx,
+    offset_y: fxx,
+    speed_x: fxx,
+    speed_y: fxx,
 
     particles_buffer: Vec<f32>,
     lines_buffer: Vec<u32>,
@@ -419,13 +434,18 @@ impl Mesh {
                     Vector2::new(1.5, 0.),
                 )
             ),
-            sizex: 0,
-            sizey: 0,
+            size: 150,
 
             dt: 0.01,
             edge_spring_constant: 50.0,
-            damping_coefficient: 0.5,
+            damping_coefficient: 10.,
             global_damping: 0.01,
+
+            scale: 1.,
+            offset_x: -4.5,
+            offset_y: 0.,
+            speed_x: 0.5,
+            speed_y: 0.,
 
             particles_buffer: Vec::new(),
             lines_buffer: Vec::new(),
@@ -435,49 +455,43 @@ impl Mesh {
         }
     }
 
-    pub fn init(&mut self, sizex: usize, sizey: usize, _scene: &str) {
+    pub fn init(&mut self) {
         // Clear existing data
         self.particles.clear();
         self.springs.clear();
-        self.sizex = sizex;
-        self.sizey = sizey;
 
-        let sizea = sizex.min(sizey);
-
-        let scale = 1.;
-
-        for i in 0..sizex {
-            for j in 0..sizey {
-                let x = i as fxx / (sizea - 1) as fxx;
-                let y = j as fxx / (sizea - 1) as fxx;
-                let mut p = Particle::new(x*scale - 4.7, y*scale - 0.5 * scale);
-                p.velocity = Vector2::new(0.5, 0.);
+        for i in 0..self.size {
+            for j in 0..self.size {
+                let x = i as fxx / (self.size - 1) as fxx;
+                let y = j as fxx / (self.size - 1) as fxx;
+                let mut p = Particle::new(x*self.scale + self.offset_x, y*self.scale - 0.5 * self.scale + self.offset_y);
+                p.velocity = Vector2::new(self.speed_x, self.speed_y);
                 self.particles.push(p);
             }
         }
 
-        let get_index = |i, j| i * sizey + j;
-        let regular_len = 1. / (sizea - 1) as fxx * scale;
+        let get_index = |i, j| i * self.size + j;
+        let regular_len = 1. / (self.size - 1) as fxx * self.scale;
         let diagonal_len = regular_len * (2.0 as fxx).sqrt();
         let diag2_len = regular_len * (5.0 as fxx).sqrt();
 
-        for i in 0..sizex {
-            for j in 0..sizey {
-                if i+1 != sizex {
+        for i in 0..self.size {
+            for j in 0..self.size {
+                if i+1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j),
                         regular_len
                     ));
                 }
-                if j+1 != sizey {
+                if j+1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i, j+1),
                         regular_len
                     ));
                 }
-                if i+1 != sizex && j+1 != sizey {
+                if i+1 != self.size && j+1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j+1),
@@ -491,7 +505,7 @@ impl Mesh {
                     ));
                 }
 
-                if i+2 < sizex && j+1 < sizey {
+                if i+2 < self.size && j+1 < self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+2, j+1),
@@ -499,7 +513,7 @@ impl Mesh {
                     ));
                 }
 
-                if i+1 < sizex && j+2 < sizey {
+                if i+1 < self.size && j+2 < self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j+2),
@@ -507,7 +521,7 @@ impl Mesh {
                     ));
                 }
 
-                if i+2 < sizex && j > 0 {
+                if i+2 < self.size && j > 0 {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+2, j-1),
@@ -515,7 +529,7 @@ impl Mesh {
                     ));
                 }
 
-                if i+1 < sizex && j > 1 {
+                if i+1 < self.size && j > 1 {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j-2),
@@ -524,20 +538,23 @@ impl Mesh {
                 }
             }
         }
+
+        self.update_buffers();
     }
 
     // Step the simulation forward in time
     pub fn step(&mut self) {
         self.integrate_rk4();
+        self.update_buffers();
     }
 
     // Runge-Kutta 4 integration
     fn integrate_rk4(&mut self) {
         // Store original state
-        let original_states: Vec<(Vector2, Vector2, bool)> = self
+        let original_states: Vec<Particle> = self
             .particles
             .iter()
-            .map(|p| (p.position, p.velocity, p.teleported))
+            .cloned()
             .collect();
 
         // Arrays for the 4 evaluations
@@ -586,7 +603,7 @@ impl Mesh {
                 let p1 = &self.particles[spring.i];
                 let p2 = &self.particles[spring.j];
 
-                if p1.teleported == p2.teleported && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor {
+                if p1.degree == p2.degree && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor {
                     spring.died = true;
                 }
             }
@@ -600,7 +617,7 @@ impl Mesh {
             &mut self.particles,
             &self.springs,
             &self.portals,
-            self.edge_spring_constant,
+            self.edge_spring_constant * (self.size as fxx) * (self.size as fxx) / 100.,
             self.damping_coefficient,
         );
 
@@ -617,7 +634,7 @@ impl Mesh {
     fn apply_derivatives_half_step(
         &mut self,
         derivatives: &Vec<(Vector2, Vector2)>,
-        original_states: &Vec<(Vector2, Vector2, bool)>,
+        original_states: &Vec<Particle>,
     ) {
         let half_dt = self.dt * 0.5;
 
@@ -625,7 +642,7 @@ impl Mesh {
             let p = &mut self.particles[i];
             let original = &original_states[i];
 
-            p.velocity = original.1 + derivatives[i].1 * half_dt;
+            p.velocity = original.velocity + derivatives[i].1 * half_dt;
             self.portals.move_particle(p, derivatives[i].0 * half_dt);
         }
     }
@@ -634,26 +651,21 @@ impl Mesh {
     fn apply_derivatives_full_step(
         &mut self,
         derivatives: &Vec<(Vector2, Vector2)>,
-        original_states: &Vec<(Vector2, Vector2, bool)>,
+        original_states: &Vec<Particle>,
     ) {
         for i in 0..self.particles.len() {
             let p = &mut self.particles[i];
             let original = &original_states[i];
 
-            p.velocity = original.1 + derivatives[i].1 * self.dt;
+            p.velocity = original.velocity + derivatives[i].1 * self.dt;
             self.portals.move_particle(p, derivatives[i].0 * self.dt);
         }
     }
 
     // Restore original state
-    fn restore_original_state(&mut self, original_states: &Vec<(Vector2, Vector2, bool)>) {
+    fn restore_original_state(&mut self, original_states: &Vec<Particle>) {
         for i in 0..self.particles.len() {
-            let p = &mut self.particles[i];
-            let original = &original_states[i];
-
-            p.position = original.0;
-            p.velocity = original.1;
-            p.teleported = original.2;
+            self.particles[i] = original_states[i].clone();
         }
     }
 
@@ -678,12 +690,36 @@ impl Mesh {
         }
     }
 
-    pub fn get_particles_buffer(&mut self) -> *const f32 {
+    pub fn update_buffers(&mut self) {
         self.particles_buffer.clear();
         for p in &self.particles {
             self.particles_buffer.push(p.position.x as f32);
             self.particles_buffer.push(p.position.y as f32);
         }
+
+        self.lines_buffer.clear();
+        for spring in &self.springs {
+            self.lines_buffer.push(spring.i as u32);
+            self.lines_buffer.push(spring.j as u32);
+        }
+
+        self.disable_lines_buffer.clear();
+        for spring in &self.springs {
+            self.disable_lines_buffer.push((self.particles[spring.i].degree != self.particles[spring.j].degree || spring.died) as u8);
+        }
+
+        self.circle1data.clear();
+        self.circle1data.push(self.portals.get_center1().x as f32);
+        self.circle1data.push(self.portals.get_center1().y as f32);
+        self.circle1data.push(self.portals.get_radius1() as f32);
+
+        self.circle2data.clear();
+        self.circle2data.push(self.portals.get_center2().x as f32);
+        self.circle2data.push(self.portals.get_center2().y as f32);
+        self.circle2data.push(self.portals.get_radius2() as f32);
+    }
+
+    pub fn get_particles_buffer(&mut self) -> *const f32 {
         self.particles_buffer.as_ptr()
     }
 
@@ -692,19 +728,10 @@ impl Mesh {
     }
 
     pub fn get_lines_buffer(&mut self) -> *const u32 {
-        self.lines_buffer.clear();
-        for spring in &self.springs {
-            self.lines_buffer.push(spring.i as u32);
-            self.lines_buffer.push(spring.j as u32);
-        }
         self.lines_buffer.as_ptr()
     }
 
     pub fn get_disable_lines_buffer(&mut self) -> *const u8 {
-        self.disable_lines_buffer.clear();
-        for spring in &self.springs {
-            self.disable_lines_buffer.push((self.particles[spring.i].teleported != self.particles[spring.j].teleported || spring.died) as u8);
-        }
         self.disable_lines_buffer.as_ptr()
     }
 
@@ -713,18 +740,10 @@ impl Mesh {
     }
 
     pub fn get_circle1_data(&mut self) -> *const f32 {
-        self.circle1data.clear();
-        self.circle1data.push(self.portals.get_center1().x as f32);
-        self.circle1data.push(self.portals.get_center1().y as f32);
-        self.circle1data.push(self.portals.get_radius1() as f32);
         self.circle1data.as_ptr()
     }
 
     pub fn get_circle2_data(&mut self) -> *const f32 {
-        self.circle2data.clear();
-        self.circle2data.push(self.portals.get_center2().x as f32);
-        self.circle2data.push(self.portals.get_center2().y as f32);
-        self.circle2data.push(self.portals.get_radius2() as f32);
         self.circle2data.as_ptr()
     }
 }
@@ -741,9 +760,9 @@ pub struct MeshHandle {
 #[wasm_bindgen]
 impl MeshHandle {
     #[wasm_bindgen(constructor)]
-    pub fn new(sizex: usize, sizey: usize, scene: &str) -> Self {
+    pub fn new() -> Self {
         let mut mesh = Mesh::new();
-        mesh.init(sizex, sizey, scene);
+        mesh.init();
         mesh.step();
         mesh.get_particles_buffer();
         mesh.get_lines_buffer();
@@ -803,7 +822,12 @@ mod tests2 {
         color_backtrace::install();
 
         let mut mesh = Mesh::new();
-        mesh.init(20, 20, "default");
+        mesh.init();
+
+        dbg!(mesh.get_particles_count());
+        dbg!(mesh.get_lines_count());
+
+        panic!();
 
         loop {
             mesh.step();
