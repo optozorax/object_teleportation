@@ -97,8 +97,21 @@ export class MeshHandle {
         MeshHandleFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
+    init() {
+        wasm.meshhandle_init(this.__wbg_ptr);
+    }
     step() {
         wasm.meshhandle_step(this.__wbg_ptr);
+    }
+    /**
+     * @param {string} name
+     * @returns {number}
+     */
+    get_constant(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.meshhandle_get_constant(this.__wbg_ptr, ptr0, len0);
+        return ret;
     }
     /**
      * @param {string} name
