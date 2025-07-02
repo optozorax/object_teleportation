@@ -48,6 +48,17 @@
         let coordinateLabels = []; // Text labels for coordinates
         let wasmMemory; // Reference to WASM memory
 
+        // Pre-allocated typed arrays for performance
+        let particleDataArray; // Pre-allocated Float32Array for particle data
+        let lineIndicesArray; // Pre-allocated Uint32Array for line indices
+        let disabledLinesArray; // Pre-allocated Uint8Array for disabled lines
+        let circle1DataArray; // Pre-allocated Float32Array for circle1 data
+        let circle2DataArray; // Pre-allocated Float32Array for circle2 data
+
+        // Maximum sizes
+        const MAX_PARTICLES = 22500;
+        const MAX_LINES = 354620;
+
         // Physics constants
         const constants = {
             dt: 0.01,
@@ -69,12 +80,41 @@
             cameraScale: 5.0 // Initial camera scale to see -5 to 5 coordinates
         };
 
+        // Initialize pre-allocated arrays
+        function initializeArrays() {
+            // Particle data: max particles * 2 coordinates (x, y)
+            particleDataArray = new Float32Array(MAX_PARTICLES * 2);
+            
+            // Line indices: max lines * 2 indices per line
+            lineIndicesArray = new Uint32Array(MAX_LINES * 2);
+            
+            // Disabled lines: max lines * 1 byte per line
+            disabledLinesArray = new Uint8Array(MAX_LINES);
+            
+            // Circle data: 3 floats each (x, y, radius)
+            circle1DataArray = new Float32Array(3);
+            circle2DataArray = new Float32Array(3);
+        }
+
+        // Copy data from WASM memory to pre-allocated arrays
+        function copyWasmData(wasmPtr, targetArray, elementCount) {
+            const wasmView = new targetArray.constructor(
+                wasmMemory.buffer,
+                wasmPtr,
+                elementCount
+            );
+            targetArray.set(wasmView.subarray(0, elementCount));
+        }
+
         // Initialize everything
         async function init2() {
             try {
                 // Load WASM module
                 const wasmModule = await init();
                 wasmMemory = wasmModule.memory;
+
+                // Initialize pre-allocated arrays
+                initializeArrays();
 
                 // Hide loading screen
                 document.getElementById('loading').style.display = 'none';
@@ -151,13 +191,13 @@
 
         function createDebugHelpers() {
             // Create grid helper
-            gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+            gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
             gridHelper.rotation.x = Math.PI / 2; // Rotate to XY plane
             gridHelper.visible = guidata.showDebugGrid;
             scene.add(gridHelper);
 
             // Create axes helper
-            axesHelper = new THREE.AxesHelper(10);
+            axesHelper = new THREE.AxesHelper(1);
             axesHelper.visible = guidata.showDebugGrid;
             scene.add(axesHelper);
 
@@ -173,8 +213,8 @@
             if (!guidata.showDebugGrid) return;
 
             // Create labels for grid points
-            for (let x = -10; x <= 10; x += 1) {
-                for (let y = -10; y <= 10; y += 1) {
+            for (let x = -5; x <= 5; x += 1) {
+                for (let y = -5; y <= 5; y += 1) {
                     if (x === 0 && y === 0) continue; // Skip origin
 
                     // Create a separate canvas for each label
@@ -267,6 +307,7 @@
             
             // Create line segments object
             linesObject = new THREE.LineSegments(geometry, material);
+            linesObject.frustumCulled = false;
             scene.add(linesObject);
         }
 
@@ -318,45 +359,44 @@
                 // Update particles
                 const particleCount = meshHandle.get_particles_count();
                 const particlesPtr = meshHandle.get_particles_buffer();
-                const particleData = new Float32Array(
-                    wasmMemory.buffer,
-                    particlesPtr,
-                    particleCount * 2  // 2 coordinates per particle
-                );
+                
+                // Copy particle data to pre-allocated array
+                copyWasmData(particlesPtr, particleDataArray, particleCount * 2);
                 
                 // Update particle positions
                 const particlePositions = particlesObject.geometry.attributes.position.array;
                 for (let i = 0; i < particleCount; i++) {
-                    particlePositions[i * 3] = particleData[i * 2];       // x
-                    particlePositions[i * 3 + 1] = particleData[i * 2 + 1]; // y
-                    particlePositions[i * 3 + 2] = 0;                     // z = 0
+                    particlePositions[i * 3] = particleDataArray[i * 2];       // x
+                    particlePositions[i * 3 + 1] = particleDataArray[i * 2 + 1]; // y
+                    particlePositions[i * 3 + 2] = 0;                          // z = 0
                 }
                 particlesObject.geometry.attributes.position.needsUpdate = true;
 
                 // Update lines
                 const lineCount = meshHandle.get_lines_count();
-                const linesPtr = meshHandle.get_lines_buffer();
-                const lineIndices = new Uint32Array(
-                    wasmMemory.buffer,
-                    linesPtr,
-                    lineCount * 2  // 2 indices per line
-                );
-
-                // Get disabled lines buffer
-                const disabledLinesPtr = meshHandle.get_disable_lines_buffer();
-                const disabledLines = new Uint8Array(
-                    wasmMemory.buffer,
-                    disabledLinesPtr,
-                    lineCount  // 1 byte per line
-                );
                 
+                // Handle dynamic line count - recreate line object if needed
+                const expectedLineVertices = lineCount * 2 * 3; // 2 vertices per line, 3 coords per vertex
+                if (linesObject.geometry.attributes.position.array.length !== expectedLineVertices) {
+                    // Recreate lines object with new size
+                    scene.remove(linesObject);
+                    createLines();
+                }
+                
+                const linesPtr = meshHandle.get_lines_buffer();
+                const disabledLinesPtr = meshHandle.get_disable_lines_buffer();
+                
+                // Copy line data to pre-allocated arrays
+                copyWasmData(linesPtr, lineIndicesArray, lineCount * 2);
+                copyWasmData(disabledLinesPtr, disabledLinesArray, lineCount);
+
                 // Update line positions based on particle positions
                 const linePositions = linesObject.geometry.attributes.position.array;
                 for (let i = 0; i < lineCount; i++) {
-                    const idx1 = lineIndices[i * 2];
-                    const idx2 = lineIndices[i * 2 + 1];
+                    const idx1 = lineIndicesArray[i * 2];
+                    const idx2 = lineIndicesArray[i * 2 + 1];
                     
-                    if (disabledLines[i] === 1) {
+                    if (disabledLinesArray[i] === 1) {
                         // Hide disabled line by setting all vertices to the same point
                         linePositions[i * 6] = 0;     // x1
                         linePositions[i * 6 + 1] = 0; // y1
@@ -368,14 +408,14 @@
                     } else {
                         // Show enabled line with proper positions
                         // First vertex of line
-                        linePositions[i * 6] = particleData[idx1 * 2];       // x1
-                        linePositions[i * 6 + 1] = particleData[idx1 * 2 + 1]; // y1
-                        linePositions[i * 6 + 2] = 0;                         // z1 = 0
+                        linePositions[i * 6] = particleDataArray[idx1 * 2];       // x1
+                        linePositions[i * 6 + 1] = particleDataArray[idx1 * 2 + 1]; // y1
+                        linePositions[i * 6 + 2] = 0;                              // z1 = 0
                         
                         // Second vertex of line
-                        linePositions[i * 6 + 3] = particleData[idx2 * 2];       // x2
-                        linePositions[i * 6 + 4] = particleData[idx2 * 2 + 1]; // y2
-                        linePositions[i * 6 + 5] = 0;                         // z2 = 0
+                        linePositions[i * 6 + 3] = particleDataArray[idx2 * 2];       // x2
+                        linePositions[i * 6 + 4] = particleDataArray[idx2 * 2 + 1]; // y2
+                        linePositions[i * 6 + 5] = 0;                              // z2 = 0
                     }
                 }
                 linesObject.geometry.attributes.position.needsUpdate = true;
@@ -392,15 +432,15 @@
             try {
                 // Update circle 1
                 const circle1Ptr = meshHandle.get_circle1_data();
-                const circle1Data = new Float32Array(wasmMemory.buffer, circle1Ptr, 3); // [x, y, radius]
-                circle1Object.position.set(circle1Data[0], circle1Data[1], 0);
-                circle1Object.scale.set(circle1Data[2], circle1Data[2], 1);
+                copyWasmData(circle1Ptr, circle1DataArray, 3);
+                circle1Object.position.set(circle1DataArray[0], circle1DataArray[1], 0);
+                circle1Object.scale.set(circle1DataArray[2], circle1DataArray[2], 1);
 
                 // Update circle 2
                 const circle2Ptr = meshHandle.get_circle2_data();
-                const circle2Data = new Float32Array(wasmMemory.buffer, circle2Ptr, 3); // [x, y, radius]
-                circle2Object.position.set(circle2Data[0], circle2Data[1], 0);
-                circle2Object.scale.set(circle2Data[2], circle2Data[2], 1);
+                copyWasmData(circle2Ptr, circle2DataArray, 3);
+                circle2Object.position.set(circle2DataArray[0], circle2DataArray[1], 0);
+                circle2Object.scale.set(circle2DataArray[2], circle2DataArray[2], 1);
             } catch (error) {
                 console.error("Error updating circles:", error);
             }

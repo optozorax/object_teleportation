@@ -36,11 +36,12 @@ pub struct EdgeSpring {
     pub j: usize,
     pub rest_length: fxx,
     pub died: bool,
+    pub show: bool,
 }
 
 impl EdgeSpring {
-    pub fn new(i: usize, j: usize, rest_length: fxx) -> Self {
-        Self { i, j, rest_length, died: false }
+    pub fn new(i: usize, j: usize, rest_length: fxx, show: bool) -> Self {
+        Self { i, j, rest_length, died: false, show }
     }
 }
 
@@ -434,7 +435,7 @@ impl Mesh {
                     Vector2::new(1.5, 0.),
                 )
             ),
-            size: 150,
+            size: 30,
 
             dt: 0.01,
             edge_spring_constant: 50.0,
@@ -481,27 +482,31 @@ impl Mesh {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j),
-                        regular_len
+                        regular_len,
+                        true
                     ));
                 }
                 if j+1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i, j+1),
-                        regular_len
+                        regular_len,
+                        true
                     ));
                 }
                 if i+1 != self.size && j+1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j+1),
-                        diagonal_len
+                        diagonal_len,
+                        false
                     ));
 
                     self.springs.push(EdgeSpring::new(
                         get_index(i+1, j),
                         get_index(i, j+1),
-                        diagonal_len
+                        diagonal_len,
+                        false
                     ));
                 }
 
@@ -509,7 +514,8 @@ impl Mesh {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+2, j+1),
-                        diag2_len
+                        diag2_len,
+                        false
                     ));
                 }
 
@@ -517,7 +523,8 @@ impl Mesh {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j+2),
-                        diag2_len
+                        diag2_len,
+                        false
                     ));
                 }
 
@@ -525,7 +532,8 @@ impl Mesh {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+2, j-1),
-                        diag2_len
+                        diag2_len,
+                        false
                     ));
                 }
 
@@ -533,7 +541,8 @@ impl Mesh {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
                         get_index(i+1, j-2),
-                        diag2_len
+                        diag2_len,
+                        false
                     ));
                 }
             }
@@ -544,8 +553,8 @@ impl Mesh {
 
     // Step the simulation forward in time
     pub fn step(&mut self) {
-        self.integrate_rk4();
         self.update_buffers();
+        self.integrate_rk4();
     }
 
     // Runge-Kutta 4 integration
@@ -643,7 +652,8 @@ impl Mesh {
             let original = &original_states[i];
 
             p.velocity = original.velocity + derivatives[i].1 * half_dt;
-            self.portals.move_particle(p, derivatives[i].0 * half_dt);
+            p.position += derivatives[i].0 * half_dt;
+            // self.portals.move_particle(p, derivatives[i].0 * half_dt);
         }
     }
 
@@ -658,7 +668,8 @@ impl Mesh {
             let original = &original_states[i];
 
             p.velocity = original.velocity + derivatives[i].1 * self.dt;
-            self.portals.move_particle(p, derivatives[i].0 * self.dt);
+            p.position += derivatives[i].0 * self.dt;
+            // self.portals.move_particle(p, derivatives[i].0 * self.dt);
         }
     }
 
@@ -705,7 +716,7 @@ impl Mesh {
 
         self.disable_lines_buffer.clear();
         for spring in &self.springs {
-            self.disable_lines_buffer.push((self.particles[spring.i].degree != self.particles[spring.j].degree || spring.died) as u8);
+            self.disable_lines_buffer.push((self.particles[spring.i].degree != self.particles[spring.j].degree || spring.died || !spring.show) as u8);
         }
 
         self.circle1data.clear();
@@ -736,7 +747,7 @@ impl Mesh {
     }
 
     pub fn get_lines_count(&mut self) -> u32 {
-        self.lines_buffer.len() as u32
+        self.springs.len() as u32
     }
 
     pub fn get_circle1_data(&mut self) -> *const f32 {
@@ -826,6 +837,8 @@ mod tests2 {
 
         dbg!(mesh.get_particles_count());
         dbg!(mesh.get_lines_count());
+
+        dbg!(mesh.lines_buffer);
 
         panic!();
 
