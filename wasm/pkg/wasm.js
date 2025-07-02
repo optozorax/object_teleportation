@@ -91,15 +91,8 @@ export class MeshHandle {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_meshhandle_free(ptr, 0);
     }
-    /**
-     * @param {number} sizex
-     * @param {number} sizey
-     * @param {string} scene
-     */
-    constructor(sizex, sizey, scene) {
-        const ptr0 = passStringToWasm0(scene, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.meshhandle_new(sizex, sizey, ptr0, len0);
+    constructor() {
+        const ret = wasm.meshhandle_new();
         this.__wbg_ptr = ret >>> 0;
         MeshHandleFinalization.register(this, this.__wbg_ptr, this);
         return this;
