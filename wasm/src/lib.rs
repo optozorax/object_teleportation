@@ -54,6 +54,8 @@ struct Portals {
     a: Matrix3,
     b: Matrix3,
 
+    portal_type: u8,
+
     a_inv: Matrix3,
     b_inv: Matrix3,
 }
@@ -185,6 +187,7 @@ impl Portals {
         Self {
             a,
             b,
+            portal_type: 0,
             a_inv: a.inverse(),
             b_inv: b.inverse(),
         }
@@ -214,12 +217,24 @@ impl Portals {
             } else if degree > 0 {
                 degree -= 1;
                 pos = self.a_inv * pos;
-                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+
+                if self.portal_type == 0 || self.portal_type == 1 {
+                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                } else if self.portal_type == 2 {
+                    // nothing
+                }
+
                 pos = self.b * pos;
             } else if degree < 0 {
                 degree += 1;
                 pos = self.b_inv * pos;
-                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+
+                if self.portal_type == 0 || self.portal_type == 1 {
+                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                } else if self.portal_type == 2 {
+                    // nothing
+                }
+
                 pos = self.a * pos;
             }
         }
@@ -238,8 +253,14 @@ impl Portals {
                 pos = self.a_inv * pos;
                 dir = self.a_inv * dir;
 
-                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                if self.portal_type == 0 {
+                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                } else if self.portal_type == 1 {
+                    dir = -dir;
+                } else if self.portal_type == 2 {
+                    // nothing
+                }
 
                 pos = self.b * pos;
                 dir = self.b * dir;
@@ -249,8 +270,14 @@ impl Portals {
                 pos = self.b_inv * pos;
                 dir = self.b_inv * dir;
 
-                pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                if self.portal_type == 0 {
+                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                } else if self.portal_type == 1 {
+                    dir = -dir;
+                } else if self.portal_type == 2 {
+                    // nothing
+                }
 
                 pos = self.a * pos;
                 dir = self.a * dir;
@@ -399,6 +426,7 @@ pub struct Mesh {
     offset_y: fxx,
     speed_x: fxx,
     speed_y: fxx,
+    portal_type: u8,
 
     particles_buffer: Vec<f32>,
     lines_buffer: Vec<u32>,
@@ -436,6 +464,7 @@ impl Mesh {
             offset_y: 0.,
             speed_x: 0.5,
             speed_y: 0.,
+            portal_type: 0,
 
             particles_buffer: Vec::new(),
             lines_buffer: Vec::new(),
@@ -449,6 +478,7 @@ impl Mesh {
         // Clear existing data
         self.particles.clear();
         self.springs.clear();
+        self.portals.portal_type = self.portal_type;
 
         for i in 0..self.size {
             for j in 0..self.size {
@@ -671,6 +701,7 @@ impl Mesh {
             "scene_offset_y" => self.offset_y as f32,
             "scene_speed_x" => self.speed_x as f32,
             "scene_speed_y" => self.speed_y as f32,
+            "scene_prtal_type" => self.portal_type as f32,
 
             _ => -100500.
         }
@@ -689,6 +720,7 @@ impl Mesh {
             "scene_offset_y" => { self.offset_y = value as fxx; self.init(); },
             "scene_speed_x" => { self.speed_x = value as fxx; self.init(); },
             "scene_speed_y" => { self.speed_y = value as fxx; self.init(); },
+            "scene_portal_type" => { self.portal_type = value as u8; self.init(); },
 
             _ => {}
         }
