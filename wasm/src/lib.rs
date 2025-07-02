@@ -208,9 +208,6 @@ impl Portals {
 
     fn teleport_position(&self, pos: Vector2, mut degree: i8) -> Vector2 {
         let mut pos = Vector3::from((pos, 1.));
-        if degree.abs() > 1 {
-            panic!("why degree {degree}?");
-        }
         loop {
             if degree == 0 {
                 break;
@@ -232,9 +229,6 @@ impl Portals {
     fn teleport_direction(&self, pos: Vector2, dir: Vector2, mut degree: i8) -> Vector2 {
         let mut pos = Vector3::from((pos, 1.));
         let mut dir = Vector3::from((dir, 0.));
-        if degree.abs() > 1 {
-            panic!("why degree {degree}?");
-        }
         loop {
             if degree == 0 {
                 break;
@@ -302,16 +296,14 @@ fn spring_force(
     damping: fxx,
 ) -> Vector2 {
     let delta = pos2 - pos1;
-    let current_length = delta.length();
+    let mut current_length = delta.length();
 
-    if current_length > rest_length * 4. {
-        dbg!(pos1, pos2, speed1, speed2, rest_length, current_length);
-        panic!()
-        // return Vector2::ZERO;
+    if current_length > rest_length * 6. {
+        current_length = rest_length * 6.;
     }
 
-    if current_length == 0.0 {
-        return Vector2::ZERO;
+    if current_length < rest_length * 0.1 {
+        current_length = rest_length * 0.1;
     }
 
     let direction = delta * (1.0 / current_length);
@@ -321,10 +313,6 @@ fn spring_force(
     let spring_force = edge_k * (current_length - rest_length);
     let damping_force = damping * relative_velocity;
     let total_force = spring_force + damping_force;
-
-    if total_force.is_nan() {
-        panic!("NAN!!!!");
-    }
 
     let force_vector = direction * total_force;
 
@@ -397,7 +385,6 @@ pub struct Mesh {
     particles: Vec<Particle>,
     springs: Vec<EdgeSpring>,
     portals: Portals,
-    size: usize,
 
     // Simulation constants
     dt: fxx,
@@ -405,6 +392,8 @@ pub struct Mesh {
     damping_coefficient: fxx,
     global_damping: fxx,
 
+    // Scene constants
+    size: usize,
     scale: fxx,
     offset_x: fxx,
     offset_y: fxx,
@@ -430,20 +419,20 @@ impl Mesh {
                     Vector2::new(-1.5, 0.),
                 ),
                 Matrix3::from_scale_angle_translation(
-                    Vector2::new(-1., -1.),
+                    Vector2::new(-1., 1.),
                     0.,
                     Vector2::new(1.5, 0.),
                 )
             ),
-            size: 30,
 
             dt: 0.01,
             edge_spring_constant: 50.0,
             damping_coefficient: 10.,
             global_damping: 0.01,
 
+            size: 30,
             scale: 1.,
-            offset_x: -4.5,
+            offset_x: -1.5,
             offset_y: 0.,
             speed_x: 0.5,
             speed_y: 0.,
@@ -465,7 +454,7 @@ impl Mesh {
             for j in 0..self.size {
                 let x = i as fxx / (self.size - 1) as fxx;
                 let y = j as fxx / (self.size - 1) as fxx;
-                let mut p = Particle::new(x*self.scale + self.offset_x, y*self.scale - 0.5 * self.scale + self.offset_y);
+                let mut p = Particle::new(x*self.scale - 0.5 * self.scale + self.offset_x, y*self.scale - 0.5 * self.scale + self.offset_y);
                 p.velocity = Vector2::new(self.speed_x, self.speed_y);
                 self.particles.push(p);
             }
@@ -551,22 +540,18 @@ impl Mesh {
         self.update_buffers();
     }
 
-    // Step the simulation forward in time
     pub fn step(&mut self) {
         self.update_buffers();
         self.integrate_rk4();
     }
 
-    // Runge-Kutta 4 integration
     fn integrate_rk4(&mut self) {
-        // Store original state
         let original_states: Vec<Particle> = self
             .particles
             .iter()
             .cloned()
             .collect();
 
-        // Arrays for the 4 evaluations
         let mut k1 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
         let mut k2 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
         let mut k3 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
@@ -589,24 +574,20 @@ impl Mesh {
         self.apply_derivatives_full_step(&k3, &original_states);
         self.evaluate_derivatives(&mut k4);
 
-        // Restore to original state before final update
         self.restore_original_state(&original_states);
 
         // STEP 5: Combine the derivatives with RK4 weights
         for i in 0..self.particles.len() {
             let p = &mut self.particles[i];
 
-            // Update position
             let position_change = k1[i].0 * 1.0 + k2[i].0 * 2.0 + k3[i].0 * 2.0 + k4[i].0 * 1.0;
-
-            // Update velocity
             let velocity_change = k1[i].1 * 1.0 + k2[i].1 * 2.0 + k3[i].1 * 2.0 + k4[i].1 * 1.0;
 
             p.velocity = p.velocity + velocity_change * (self.dt / 6.0);
             self.portals.move_particle(p, position_change * (self.dt / 6.0));
         }
 
-        let spring_die_factor = 3.;
+        let spring_die_factor = 5.;
         for spring in &mut self.springs {
             if !spring.died {
                 let p1 = &self.particles[spring.i];
@@ -619,9 +600,7 @@ impl Mesh {
         }
     }
 
-    // Evaluate derivatives at current state
     fn evaluate_derivatives(&mut self, derivatives: &mut Vec<(Vector2, Vector2)>) {
-        // Calculate forces
         calc_forces(
             &mut self.particles,
             &self.springs,
@@ -630,16 +609,17 @@ impl Mesh {
             self.damping_coefficient,
         );
 
-        // Store derivatives
         for (i, p) in self.particles.iter().enumerate() {
-            // Apply global damping
-            let damped_force = p.force - (p.velocity * self.global_damping);
+            let mut damped_force = p.force - (p.velocity * self.global_damping);
+
+            if damped_force.length() > 1e6 {
+                damped_force = damped_force.normalize() * 1e6;
+            }
 
             derivatives[i] = (p.velocity, damped_force);
         }
     }
 
-    // Apply half-step changes
     fn apply_derivatives_half_step(
         &mut self,
         derivatives: &Vec<(Vector2, Vector2)>,
@@ -657,7 +637,6 @@ impl Mesh {
         }
     }
 
-    // Apply full-step changes
     fn apply_derivatives_full_step(
         &mut self,
         derivatives: &Vec<(Vector2, Vector2)>,
@@ -673,30 +652,44 @@ impl Mesh {
         }
     }
 
-    // Restore original state
     fn restore_original_state(&mut self, original_states: &Vec<Particle>) {
         for i in 0..self.particles.len() {
             self.particles[i] = original_states[i].clone();
         }
     }
 
-    // Get constants
-    pub fn get_constants(&self) -> (fxx, fxx, fxx, fxx) {
-        (
-            self.dt,
-            self.edge_spring_constant,
-            self.damping_coefficient,
-            self.global_damping,
-        )
+    pub fn get_constant(&self, name: &str) -> f32 {
+        match name {
+            "dt" => self.dt as f32,
+            "edgeSpringConstant" => self.edge_spring_constant as f32,
+            "dampingCoefficient" => self.damping_coefficient as f32,
+            "globalDamping" => self.global_damping as f32,
+
+            "scene_size" => self.size as f32,
+            "scene_scale" => self.scale as f32,
+            "scene_offset_x" => self.offset_x as f32,
+            "scene_offset_y" => self.offset_y as f32,
+            "scene_speed_x" => self.speed_x as f32,
+            "scene_speed_y" => self.speed_y as f32,
+
+            _ => -100500.
+        }
     }
 
-    // Set constant
     pub fn set_constant(&mut self, name: &str, value: f32) {
         match name {
             "dt" => self.dt = value as fxx,
             "edgeSpringConstant" => self.edge_spring_constant = value as fxx,
             "dampingCoefficient" => self.damping_coefficient = value as fxx,
             "globalDamping" => self.global_damping = value as fxx,
+
+            "scene_size" => { self.size = value as usize; self.init(); },
+            "scene_scale" => { self.scale = value as fxx; self.init(); },
+            "scene_offset_x" => { self.offset_x = value as fxx; self.init(); },
+            "scene_offset_y" => { self.offset_y = value as fxx; self.init(); },
+            "scene_speed_x" => { self.speed_x = value as fxx; self.init(); },
+            "scene_speed_y" => { self.speed_y = value as fxx; self.init(); },
+
             _ => {}
         }
     }
@@ -772,19 +765,26 @@ pub struct MeshHandle {
 impl MeshHandle {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        let mut mesh = Mesh::new();
+        let mut mesh = Self { mesh: Mesh::new() };
         mesh.init();
-        mesh.step();
-        mesh.get_particles_buffer();
-        mesh.get_lines_buffer();
-        mesh.get_circle1_data();
-        mesh.get_circle2_data();
+        mesh
+    }
 
-        Self { mesh }
+    pub fn init(&mut self) {
+        self.mesh.init();
+        self.mesh.step();
+        self.mesh.get_particles_buffer();
+        self.mesh.get_lines_buffer();
+        self.mesh.get_circle1_data();
+        self.mesh.get_circle2_data();
     }
 
     pub fn step(&mut self) {
         self.mesh.step();
+    }
+
+    pub fn get_constant(&mut self, name: &str) -> f32 {
+        self.mesh.get_constant(name)
     }
 
     pub fn set_constant(&mut self, name: &str, value: f32) {
@@ -835,12 +835,14 @@ mod tests2 {
         let mut mesh = Mesh::new();
         mesh.init();
 
-        dbg!(mesh.get_particles_count());
-        dbg!(mesh.get_lines_count());
+        mesh.size = 120;
+        mesh.offset_x = -1.5;
+        mesh.edge_spring_constant = 200.;
 
-        dbg!(mesh.lines_buffer);
-
-        panic!();
+        // mesh.size = 120;
+        // mesh.scale = 3.27;
+        // mesh.offset_x = -4.49;
+        // mesh.speed_x = 2.12;
 
         loop {
             mesh.step();

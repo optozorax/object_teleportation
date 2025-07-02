@@ -61,11 +61,17 @@
 
         // Physics constants
         const constants = {
-            dt: 0.01,
+            dt: 0.001,
             edgeSpringConstant: 50,
             dampingCoefficient: 10.0,
             globalDamping: 0.01,
-            iterations: 3
+            iterations: 30,
+            scene_size: 30,
+            scene_scale: 1.,
+            scene_offset_x: -4.5,
+            scene_offset_y: 0.,
+            scene_speed_x: 0.5,
+            scene_speed_y: 0.,
         };
 
         const guidata = {
@@ -77,7 +83,7 @@
             circle1Color: '#ff8800',
             circle2Color: '#0088ff',
             showDebugGrid: false,
-            cameraScale: 5.0 // Initial camera scale to see -5 to 5 coordinates
+            cameraScale: 5.0
         };
 
         // Initialize pre-allocated arrays
@@ -359,6 +365,14 @@
                 // Update particles
                 const particleCount = meshHandle.get_particles_count();
                 const particlesPtr = meshHandle.get_particles_buffer();
+
+                // Handle dynamic line count - recreate particle object if needed
+                const expectedParticlesVertices = particleCount * 3; // 2 vertices per line, 3 coords per vertex
+                if (particlesObject.geometry.attributes.position.array.length !== expectedParticlesVertices) {
+                    // Recreate lines object with new size
+                    scene.remove(particlesObject);
+                    createParticles();
+                }
                 
                 // Copy particle data to pre-allocated array
                 copyWasmData(particlesPtr, particleDataArray, particleCount * 2);
@@ -452,9 +466,14 @@
             // Simulation control
             gui.add(guidata, "run_simulation");
 
+            var obj = { add:function(){ 
+                meshHandle.init();
+                updateVisualization();
+            }};
+            gui.add(obj,'add').name("Reset");
+
             // Camera settings
-            const cameraFolder = gui.addFolder("Camera Settings");
-            cameraFolder.add(guidata, "showDebugGrid").onChange(value => {
+            gui.add(guidata, "showDebugGrid").onChange(value => {
                 gridHelper.visible = value;
                 axesHelper.visible = value;
                 coordinateLabels.forEach(label => label.visible = value);
@@ -462,7 +481,6 @@
                     createCoordinateLabels();
                 }
             });
-            cameraFolder.open();
 
             // Visual settings
             const visualFolder = gui.addFolder("Visual Settings");
@@ -483,10 +501,10 @@
                 circle2Object.material.color.set(value);
                 circle2Object.children[0].material.color.set(value);
             });
-            visualFolder.open();
 
             // Physics parameters
             const physicsFolder = gui.addFolder("Physics Parameters");
+            const sceneFolder = gui.addFolder("Scene Parameters");
             
             // Add controls for each constant
             for (const name in constants) {
@@ -495,36 +513,47 @@
                 // Different ranges based on parameter
                 let min, max, step;
 
-                if (name === "iterations") {
-                    min = 1;
-                    max = 10;
-                    step = 1;
-                } else if (name === 'edgeSpringConstant') {
-                    min = 0;
-                    max = 1000;
-                    step = 0.1;
-                } else if (name === 'dt') {
-                    min = 0.001;
-                    max = 0.1;
-                    step = 0.001;
-                } else if (name === 'dampingCoefficient') {
-                    min = 0;
-                    max = 50;
-                    step = 0.01;
+                let clamps = {
+                    "iterations": [1, 30, 1],
+                    "edgeSpringConstant": [0, 1000, 1],
+                    "dt": [0.0001, 0.1, 0.0001],
+                    "dampingCoefficient": [0, 50, 0.1],
+
+                    "scene_size": [0, 120, 1],
+                    "scene_scale": [0.01, 10., 0.01],
+                    "scene_offset_x": [-5, 5, 0.01],
+                    "scene_offset_y": [-5, 5, 0.01],
+                    "scene_speed_x": [-5, 5, 0.01],
+                    "scene_speed_y": [-5, 5, 0.01],
+                };
+
+                if (name in clamps) {
+                    min = clamps[name][0];
+                    max = clamps[name][1];
+                    step = clamps[name][2];
                 } else {
                     min = 0;
                     max = 5;
                     step = 0.01;
                 }
 
-                physicsFolder.add(constants, name, min, max, step).onChange(value => {
-                    if (name !== "iterations") {
-                        // Forward the change to WASM
+                if (name.startsWith("scene_")) {
+                    sceneFolder.add(constants, name, min, max, step).onChange(value => {
                         meshHandle.set_constant(name, value);
-                    }
-                });
+
+                        updateVisualization();
+                    });
+                } else {
+                    physicsFolder.add(constants, name, min, max, step).onChange(value => {
+                        if (name !== "iterations") {
+                            // Forward the change to WASM
+                            meshHandle.set_constant(name, value);
+                        }
+                    });
+                }
             }
             physicsFolder.open();
+            sceneFolder.open();
         }
 
         function updateCameraScale(scale) {
