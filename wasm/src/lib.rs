@@ -41,7 +41,13 @@ pub struct EdgeSpring {
 
 impl EdgeSpring {
     pub fn new(i: usize, j: usize, rest_length: fxx, show: bool) -> Self {
-        Self { i, j, rest_length, died: false, show }
+        Self {
+            i,
+            j,
+            rest_length,
+            died: false,
+            show,
+        }
     }
 }
 
@@ -63,51 +69,51 @@ struct Portals {
 fn is_intersects_unit_circle(a: Vector2, b: Vector2) -> bool {
     let a_dist_sq = a.length_squared();
     let b_dist_sq = b.length_squared();
-    
+
     // Check if either endpoint is exactly on the circle
     if (a_dist_sq - 1.0).abs() < fxx::EPSILON || (b_dist_sq - 1.0).abs() < fxx::EPSILON {
         return true;
     }
-    
+
     // If both points are inside the circle, no intersection with border
     if a_dist_sq < 1.0 && b_dist_sq < 1.0 {
         return false;
     }
-    
+
     // If one point is inside and one outside, must cross the border
     if (a_dist_sq < 1.0) != (b_dist_sq < 1.0) {
         return true;
     }
-    
+
     // Both points are outside the circle
     // Solve the quadratic equation for line-circle intersection
     let ab = b - a;
     let ab_len_sq = ab.length_squared();
-    
+
     // Handle degenerate case (same point)
     if ab_len_sq < fxx::EPSILON {
         return false;
     }
-    
+
     // Quadratic equation: |a + t(b-a)|² = 1
     // Expanded: |a|² + 2t⟨a,b-a⟩ + t²|b-a|² = 1
     // Rearranged: |b-a|²t² + 2⟨a,b-a⟩t + (|a|² - 1) = 0
-    let c = a_dist_sq - 1.0;  // constant term
-    let b_coeff = 2.0 * a.dot(ab);  // linear coefficient
-    let a_coeff = ab_len_sq;  // quadratic coefficient
-    
+    let c = a_dist_sq - 1.0; // constant term
+    let b_coeff = 2.0 * a.dot(ab); // linear coefficient
+    let a_coeff = ab_len_sq; // quadratic coefficient
+
     let discriminant = b_coeff * b_coeff - 4.0 * a_coeff * c;
-    
+
     // No real solutions = no intersection
     if discriminant < 0.0 {
         return false;
     }
-    
+
     // Calculate the two solutions
     let sqrt_discriminant = discriminant.sqrt();
     let t1 = (-b_coeff - sqrt_discriminant) / (2.0 * a_coeff);
     let t2 = (-b_coeff + sqrt_discriminant) / (2.0 * a_coeff);
-    
+
     // Check if either intersection point lies on the segment [0, 1]
     (t1 >= 0.0 && t1 <= 1.0) || (t2 >= 0.0 && t2 <= 1.0)
 }
@@ -119,43 +125,79 @@ mod tests {
     #[test]
     fn test_one_endpoint_inside_one_outside() {
         // One point inside, one outside - must cross border
-        assert!(is_intersects_unit_circle(Vector2::new(0.5, 0.0), Vector2::new(2.0, 0.0)));
-        assert!(is_intersects_unit_circle(Vector2::new(2.0, 0.0), Vector2::new(0.5, 0.0)));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(0.5, 0.0),
+            Vector2::new(2.0, 0.0)
+        ));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(2.0, 0.0),
+            Vector2::new(0.5, 0.0)
+        ));
     }
 
     #[test]
     fn test_both_endpoints_inside_circle() {
         // Both points inside circle - no border intersection
-        assert!(!is_intersects_unit_circle(Vector2::new(0.5, 0.0), Vector2::new(0.0, 0.5)));
-        assert!(!is_intersects_unit_circle(Vector2::new(-0.3, 0.3), Vector2::new(0.2, -0.4)));
+        assert!(!is_intersects_unit_circle(
+            Vector2::new(0.5, 0.0),
+            Vector2::new(0.0, 0.5)
+        ));
+        assert!(!is_intersects_unit_circle(
+            Vector2::new(-0.3, 0.3),
+            Vector2::new(0.2, -0.4)
+        ));
     }
 
     #[test]
     fn test_endpoint_on_circle() {
         // Point on circle boundary
-        assert!(is_intersects_unit_circle(Vector2::new(1.0, 0.0), Vector2::new(2.0, 0.0)));
-        assert!(is_intersects_unit_circle(Vector2::new(0.0, 1.0), Vector2::new(0.0, 2.0)));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(1.0, 0.0),
+            Vector2::new(2.0, 0.0)
+        ));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(0.0, 1.0),
+            Vector2::new(0.0, 2.0)
+        ));
     }
 
     #[test]
     fn test_segment_tangent_to_circle() {
         // Segment tangent to circle (touches border at exactly one point)
-        assert!(is_intersects_unit_circle(Vector2::new(-1.0, 1.0), Vector2::new(1.0, 1.0)));
-        assert!(is_intersects_unit_circle(Vector2::new(1.0, -1.0), Vector2::new(1.0, 1.0)));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(-1.0, 1.0),
+            Vector2::new(1.0, 1.0)
+        ));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(1.0, -1.0),
+            Vector2::new(1.0, 1.0)
+        ));
     }
 
     #[test]
     fn test_segment_crosses_circle_completely() {
         // Segment passes through circle (enters and exits)
-        assert!(is_intersects_unit_circle(Vector2::new(-2.0, 0.0), Vector2::new(2.0, 0.0)));
-        assert!(is_intersects_unit_circle(Vector2::new(0.0, -2.0), Vector2::new(0.0, 2.0)));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(-2.0, 0.0),
+            Vector2::new(2.0, 0.0)
+        ));
+        assert!(is_intersects_unit_circle(
+            Vector2::new(0.0, -2.0),
+            Vector2::new(0.0, 2.0)
+        ));
     }
 
     #[test]
     fn test_segment_misses_circle() {
         // Segment completely outside circle, doesn't touch border
-        assert!(!is_intersects_unit_circle(Vector2::new(2.0, 2.0), Vector2::new(3.0, 2.0)));
-        assert!(!is_intersects_unit_circle(Vector2::new(1.5, 0.0), Vector2::new(2.0, 0.0)));
+        assert!(!is_intersects_unit_circle(
+            Vector2::new(2.0, 2.0),
+            Vector2::new(3.0, 2.0)
+        ));
+        assert!(!is_intersects_unit_circle(
+            Vector2::new(1.5, 0.0),
+            Vector2::new(2.0, 0.0)
+        ));
     }
 }
 
@@ -180,7 +222,6 @@ fn reflect_direction_around_unit_circle(pos: Vector2, dir: Vector2) -> Vector2 {
 
     reflected.normalize() * dir.length()
 }
-
 
 impl Portals {
     fn new(a: Matrix3, b: Matrix3) -> Portals {
@@ -255,7 +296,10 @@ impl Portals {
 
                 if self.portal_type == 0 {
                     pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                    dir = Vector3::from((
+                        reflect_direction_around_unit_circle(pos.xy(), dir.xy()),
+                        0.,
+                    ));
                 } else if self.portal_type == 1 {
                     dir = -dir;
                 } else if self.portal_type == 2 {
@@ -272,7 +316,10 @@ impl Portals {
 
                 if self.portal_type == 0 {
                     pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir = Vector3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
+                    dir = Vector3::from((
+                        reflect_direction_around_unit_circle(pos.xy(), dir.xy()),
+                        0.,
+                    ));
                 } else if self.portal_type == 1 {
                     dir = -dir;
                 } else if self.portal_type == 2 {
@@ -291,7 +338,10 @@ impl Portals {
         let new_pos: Vector3 = (new_pos, 1.0).into();
         if is_intersects_unit_circle((self.a_inv * prev_pos).xy(), (self.a_inv * new_pos).xy()) {
             Some(1)
-        } else if is_intersects_unit_circle((self.b_inv * prev_pos).xy(), (self.b_inv * new_pos).xy()) {
+        } else if is_intersects_unit_circle(
+            (self.b_inv * prev_pos).xy(),
+            (self.b_inv * new_pos).xy(),
+        ) {
             Some(-1)
         } else {
             None
@@ -300,7 +350,8 @@ impl Portals {
 
     fn move_particle(&self, particle: &mut Particle, offset: Vector2) {
         if let Some(dir) = self.is_intersect(particle.position, particle.position + offset) {
-            particle.velocity = self.teleport_direction(particle.position + offset, particle.velocity, dir);
+            particle.velocity =
+                self.teleport_direction(particle.position + offset, particle.velocity, dir);
             particle.position = self.teleport_position(particle.position + offset, dir);
             particle.degree += dir;
         } else {
@@ -374,7 +425,7 @@ fn calc_forces(
                 portals.teleport_direction(p2.position, p2.velocity, p1.degree - p2.degree),
                 spring.rest_length,
                 edge_k,
-                damping
+                damping,
             );
 
             // in p2 local coordinates
@@ -385,21 +436,32 @@ fn calc_forces(
                 p2.velocity,
                 spring.rest_length,
                 edge_k,
-                damping
+                damping,
             );
 
-            let force1_avg = (force1 + portals.teleport_direction(p2.position, force2, p1.degree - p2.degree)) / 2.;
-            let force2_avg = (force2 + portals.teleport_direction(p1.position, force1, p2.degree - p1.degree)) / 2.;
+            let force1_avg = (force1
+                + portals.teleport_direction(p2.position, force2, p1.degree - p2.degree))
+                / 2.;
+            let force2_avg = (force2
+                + portals.teleport_direction(p1.position, force1, p2.degree - p1.degree))
+                / 2.;
 
             particles[spring.i].force += force1_avg;
             particles[spring.j].force -= force2_avg;
         } else {
-            let force_vector = spring_force(p1.position, p2.position, p1.velocity, p2.velocity, spring.rest_length, edge_k, damping);
+            let force_vector = spring_force(
+                p1.position,
+                p2.position,
+                p1.velocity,
+                p2.velocity,
+                spring.rest_length,
+                edge_k,
+                damping,
+            );
 
             particles[spring.i].force += force_vector;
             particles[spring.j].force -= force_vector;
         };
-        
     }
 }
 
@@ -450,7 +512,7 @@ impl Mesh {
                     Vector2::new(-1., 1.),
                     0.,
                     Vector2::new(1.5, 0.),
-                )
+                ),
             ),
 
             dt: 0.01,
@@ -484,7 +546,10 @@ impl Mesh {
             for j in 0..self.size {
                 let x = i as fxx / (self.size - 1) as fxx;
                 let y = j as fxx / (self.size - 1) as fxx;
-                let mut p = Particle::new(x*self.scale - 0.5 * self.scale + self.offset_x, y*self.scale - 0.5 * self.scale + self.offset_y);
+                let mut p = Particle::new(
+                    x * self.scale - 0.5 * self.scale + self.offset_x,
+                    y * self.scale - 0.5 * self.scale + self.offset_y,
+                );
                 p.velocity = Vector2::new(self.speed_x, self.speed_y);
                 self.particles.push(p);
             }
@@ -497,71 +562,71 @@ impl Mesh {
 
         for i in 0..self.size {
             for j in 0..self.size {
-                if i+1 != self.size {
+                if i + 1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+1, j),
+                        get_index(i + 1, j),
                         regular_len,
-                        true
+                        true,
                     ));
                 }
-                if j+1 != self.size {
+                if j + 1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i, j+1),
+                        get_index(i, j + 1),
                         regular_len,
-                        true
+                        true,
                     ));
                 }
-                if i+1 != self.size && j+1 != self.size {
+                if i + 1 != self.size && j + 1 != self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+1, j+1),
+                        get_index(i + 1, j + 1),
                         diagonal_len,
-                        false
+                        false,
                     ));
 
                     self.springs.push(EdgeSpring::new(
-                        get_index(i+1, j),
-                        get_index(i, j+1),
+                        get_index(i + 1, j),
+                        get_index(i, j + 1),
                         diagonal_len,
-                        false
+                        false,
                     ));
                 }
 
-                if i+2 < self.size && j+1 < self.size {
+                if i + 2 < self.size && j + 1 < self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+2, j+1),
+                        get_index(i + 2, j + 1),
                         diag2_len,
-                        false
+                        false,
                     ));
                 }
 
-                if i+1 < self.size && j+2 < self.size {
+                if i + 1 < self.size && j + 2 < self.size {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+1, j+2),
+                        get_index(i + 1, j + 2),
                         diag2_len,
-                        false
+                        false,
                     ));
                 }
 
-                if i+2 < self.size && j > 0 {
+                if i + 2 < self.size && j > 0 {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+2, j-1),
+                        get_index(i + 2, j - 1),
                         diag2_len,
-                        false
+                        false,
                     ));
                 }
 
-                if i+1 < self.size && j > 1 {
+                if i + 1 < self.size && j > 1 {
                     self.springs.push(EdgeSpring::new(
                         get_index(i, j),
-                        get_index(i+1, j-2),
+                        get_index(i + 1, j - 2),
                         diag2_len,
-                        false
+                        false,
                     ));
                 }
             }
@@ -576,11 +641,7 @@ impl Mesh {
     }
 
     fn integrate_rk4(&mut self) {
-        let original_states: Vec<Particle> = self
-            .particles
-            .iter()
-            .cloned()
-            .collect();
+        let original_states: Vec<Particle> = self.particles.iter().cloned().collect();
 
         let mut k1 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
         let mut k2 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
@@ -614,7 +675,8 @@ impl Mesh {
             let velocity_change = k1[i].1 * 1.0 + k2[i].1 * 2.0 + k3[i].1 * 2.0 + k4[i].1 * 1.0;
 
             p.velocity = p.velocity + velocity_change * (self.dt / 6.0);
-            self.portals.move_particle(p, position_change * (self.dt / 6.0));
+            self.portals
+                .move_particle(p, position_change * (self.dt / 6.0));
         }
 
         let spring_die_factor = 5.;
@@ -623,7 +685,9 @@ impl Mesh {
                 let p1 = &self.particles[spring.i];
                 let p2 = &self.particles[spring.j];
 
-                if p1.degree == p2.degree && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor {
+                if p1.degree == p2.degree
+                    && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor
+                {
                     spring.died = true;
                 }
             }
@@ -703,7 +767,7 @@ impl Mesh {
             "scene_speed_y" => self.speed_y as f32,
             "scene_prtal_type" => self.portal_type as f32,
 
-            _ => -100500.
+            _ => -100500.,
         }
     }
 
@@ -714,13 +778,34 @@ impl Mesh {
             "dampingCoefficient" => self.damping_coefficient = value as fxx,
             "globalDamping" => self.global_damping = value as fxx,
 
-            "scene_size" => { self.size = value as usize; self.init(); },
-            "scene_scale" => { self.scale = value as fxx; self.init(); },
-            "scene_offset_x" => { self.offset_x = value as fxx; self.init(); },
-            "scene_offset_y" => { self.offset_y = value as fxx; self.init(); },
-            "scene_speed_x" => { self.speed_x = value as fxx; self.init(); },
-            "scene_speed_y" => { self.speed_y = value as fxx; self.init(); },
-            "scene_portal_type" => { self.portal_type = value as u8; self.init(); },
+            "scene_size" => {
+                self.size = value as usize;
+                self.init();
+            }
+            "scene_scale" => {
+                self.scale = value as fxx;
+                self.init();
+            }
+            "scene_offset_x" => {
+                self.offset_x = value as fxx;
+                self.init();
+            }
+            "scene_offset_y" => {
+                self.offset_y = value as fxx;
+                self.init();
+            }
+            "scene_speed_x" => {
+                self.speed_x = value as fxx;
+                self.init();
+            }
+            "scene_speed_y" => {
+                self.speed_y = value as fxx;
+                self.init();
+            }
+            "scene_portal_type" => {
+                self.portal_type = value as u8;
+                self.init();
+            }
 
             _ => {}
         }
@@ -741,7 +826,11 @@ impl Mesh {
 
         self.disable_lines_buffer.clear();
         for spring in &self.springs {
-            self.disable_lines_buffer.push((self.particles[spring.i].degree != self.particles[spring.j].degree || spring.died || !spring.show) as u8);
+            self.disable_lines_buffer.push(
+                (self.particles[spring.i].degree != self.particles[spring.j].degree
+                    || spring.died
+                    || !spring.show) as u8,
+            );
         }
 
         self.circle1data.clear();
@@ -797,9 +886,9 @@ pub struct MeshHandle {
 impl MeshHandle {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        let mut mesh = Self { mesh: Mesh::new() };
-        mesh.init();
-        mesh
+        let mut result = Self { mesh: Mesh::new() };
+        result.init();
+        result
     }
 
     pub fn init(&mut self) {
