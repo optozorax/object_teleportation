@@ -78,7 +78,7 @@
         const guidata = {
             run_simulation: false,
             scene: "default",
-            particleSize: 5.0,
+            particleSize: 2.5,
             particleColor: '#0ea100',
             lineWidth: 1,
             circle1Color: '#ff8800',
@@ -88,7 +88,7 @@
         };
 
         const guidata_copy = {
-            guidata_particleSize: 5.0,
+            guidata_particleSize: 2.5,
             guidata_particleColor: '#0ea100',
             guidata_lineWidth: 1,
             guidata_circle1Color: '#ff8800',
@@ -641,7 +641,7 @@
 
             // Visual settings
             const visualFolder = gui.addFolder("Visual Settings");
-            visualFolder.add(guidata, "particleSize", 1.0, 100.0, 0.1).onChange(value => {
+            visualFolder.add(guidata, "particleSize", 0.0, 10.0, 0.01).onChange(value => {
                 particlesObject.material.size = value;
             }).listen();
             visualFolder.addColor(guidata, "particleColor").onChange(value => {
