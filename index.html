@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>2D Particle Viewer</title>
+    <title>Softbody object teleportation</title>
     <style>
         body {
             margin: 0;
@@ -68,7 +68,7 @@
             iterations: 30,
             scene_size: 30,
             scene_scale: 1.,
-            scene_offset_x: -4.5,
+            scene_offset_x: -4.,
             scene_offset_y: 0.,
             scene_speed_x: 0.5,
             scene_speed_y: 0.,
@@ -77,14 +77,22 @@
 
         const guidata = {
             run_simulation: false,
+            scene: "default",
             particleSize: 5.0,
             particleColor: '#0ea100',
-            lineColor: '#fafafa',
             lineWidth: 1,
             circle1Color: '#ff8800',
             circle2Color: '#0088ff',
             showDebugGrid: false,
             cameraScale: 5.0
+        };
+
+        const guidata_copy = {
+            guidata_particleSize: 5.0,
+            guidata_particleColor: '#0ea100',
+            guidata_lineWidth: 1,
+            guidata_circle1Color: '#ff8800',
+            guidata_circle2Color: '#0088ff',
         };
 
         // Initialize pre-allocated arrays
@@ -111,6 +119,149 @@
                 elementCount
             );
             targetArray.set(wasmView.subarray(0, elementCount));
+        }
+
+        const scenes = {
+            "default": {
+                ...constants,
+                ...guidata_copy,
+            },
+            "rigid": {
+                ...constants,
+                ...guidata_copy,
+                edgeSpringConstant: 500.,
+
+                guidata_particleColor: "#cfca09",
+            },
+            "more rigid": {
+                ...constants,
+                ...guidata_copy,
+                edgeSpringConstant: 1000.,
+
+                guidata_particleColor: "#c00000",
+            },
+            "big": {
+                ...constants,
+                ...guidata_copy,
+                scene_offset_x: -4.5,
+                scene_scale: 2.,
+            },
+            "even bigger": {
+                ...constants,
+                ...guidata_copy,
+                scene_scale: 4.,
+                scene_offset_x: -6.,
+                scene_speed_x: 2.,
+            },
+            "bigger rigid": {
+                ...constants,
+                ...guidata_copy,
+                scene_scale: 4.,
+                scene_offset_x: -6.,
+                scene_speed_x: 2.,
+                edgeSpringConstant: 500.,
+
+                guidata_particleColor: "#cfca09",
+            },
+            "refraction": {
+                ...constants,
+                ...guidata_copy,
+                scene_offset_x: -3.5,
+                scene_offset_y: -1.3,
+            },
+            "reflection": {
+                ...constants,
+                ...guidata_copy,
+                edgeSpringConstant: 500.,
+                scene_offset_x: -3.5,
+                scene_offset_y: -1.,
+
+                guidata_particleColor: "#cfca09",
+            },
+            "small": {
+                ...constants,
+                ...guidata_copy,
+                scene_offset_x: -2.55,
+                scene_scale: 0.01,
+                iterations: 1,
+            },
+            "no springs": {
+                ...constants,
+                ...guidata_copy,
+                edgeSpringConstant: 0.,
+                dampingCoefficient: 0.1,
+
+                guidata_particleColor: "#ffffff",
+            },
+            "inside": {
+                ...constants,
+                ...guidata_copy,
+                scene_offset_x: -1.5,
+            },
+            "regular portal": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal_type: 2.,
+
+                guidata_circle1Color: "#8b8b8b",
+                guidata_circle2Color: "#ffffff",
+            },
+            "perspective portal": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal_type: 1.,
+
+                guidata_circle1Color: "#12ff00",
+                guidata_circle2Color: "#ff002e",
+
+            },
+            "perspective portal, no springs": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal_type: 1.,
+                edgeSpringConstant: 0.,
+                dampingCoefficient: 0.1,
+
+                guidata_particleColor: "#ffffff",
+                guidata_circle1Color: "#12ff00",
+                guidata_circle2Color: "#ff002e",
+            },
+            "perspective portal, rotation": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal_type: 1.,
+                edgeSpringConstant: 500.,
+                scene_offset_x: -3.5,
+                scene_offset_y: -1.13,
+
+                guidata_circle1Color: "#12ff00",
+                guidata_circle2Color: "#ff002e",
+                guidata_particleColor: "#cfca09",
+            },
+        };
+
+        function initScene() {
+            for (const [name, scene] of Object.entries(scenes)) {
+                if (guidata.scene == name) {
+                    for (const [key, value] of Object.entries(scene)) {
+                        if (key.startsWith("guidata_")) {
+                            guidata[key.slice("guidata_".length)] = value;
+                        } else {
+                            constants[key] = value;
+                            meshHandle.set_constant(key, value);
+                        }
+                    }
+                    break;
+                }
+            }
+            particlesObject.material.color.set(guidata.particleColor);
+            linesObject.material.color.set(guidata.particleColor);
+            circle1Object.material.color.set(guidata.circle1Color);
+            circle1Object.children[0].material.color.set(guidata.circle1Color);
+            circle2Object.material.color.set(guidata.circle2Color);
+            circle2Object.children[0].material.color.set(guidata.circle2Color);
+            meshHandle.init();
+            updateVisualization();
         }
 
         // Initialize everything
@@ -183,6 +334,8 @@
 
                 // Handle window resize
                 window.addEventListener('resize', onWindowResize);
+
+                initScene();
 
                 updateVisualization();
 
@@ -308,7 +461,7 @@
             
             // Create material for lines
             const material = new THREE.LineBasicMaterial({
-                color: guidata.lineColor,
+                color: guidata.particleColor,
                 linewidth: guidata.lineWidth
             });
             
@@ -464,8 +617,11 @@
         function setupGUI() {
             const gui = new dat.GUI();
 
-            // Simulation control
             gui.add(guidata, "run_simulation");
+
+            gui.add(guidata, "scene", Object.keys(scenes)).onChange(value => {
+                initScene();
+            });
 
             var obj = { add:function(){ 
                 meshHandle.init();
@@ -487,21 +643,19 @@
             const visualFolder = gui.addFolder("Visual Settings");
             visualFolder.add(guidata, "particleSize", 1.0, 100.0, 0.1).onChange(value => {
                 particlesObject.material.size = value;
-            });
+            }).listen();
             visualFolder.addColor(guidata, "particleColor").onChange(value => {
                 particlesObject.material.color.set(value);
-            });
-            visualFolder.addColor(guidata, "lineColor").onChange(value => {
                 linesObject.material.color.set(value);
-            });
+            }).listen();
             visualFolder.addColor(guidata, "circle1Color").onChange(value => {
                 circle1Object.material.color.set(value);
                 circle1Object.children[0].material.color.set(value);
-            });
+            }).listen();
             visualFolder.addColor(guidata, "circle2Color").onChange(value => {
                 circle2Object.material.color.set(value);
                 circle2Object.children[0].material.color.set(value);
-            });
+            }).listen();
 
             // Physics parameters
             const physicsFolder = gui.addFolder("Physics Parameters");
@@ -547,14 +701,14 @@
                         meshHandle.set_constant(name, value);
 
                         updateVisualization();
-                    }).name(label);
+                    }).name(label).listen();
                 } else {
                     physicsFolder.add(constants, name, min, max, step).onChange(value => {
                         if (name !== "iterations") {
                             // Forward the change to WASM
                             meshHandle.set_constant(name, value);
                         }
-                    }).name(label);
+                    }).name(label).listen();
                 }
             }
             physicsFolder.open();
