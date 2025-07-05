@@ -43,7 +43,7 @@
         let meshHandle; // WASM handle
         let particlesObject, particlesObject2, particlesObject4; // THREE.js points objects
         let linesObject, linesObject2, linesObject4; // THREE.js lines objects
-        let circle1Object, circle2Object; // Circle objects
+        let circle1Object, circle2Object, circle1TeleportedObject, circle2TeleportedObject; // Circle objects
         let gridHelper, axesHelper; // Debug helpers
         let coordinateLabels = []; // Text labels for coordinates
         let wasmMemory; // Reference to WASM memory
@@ -267,8 +267,12 @@
             linesObject4.material.color.set(guidata.line4Color);
             circle1Object.material.color.set(guidata.circle1Color);
             circle1Object.children[0].material.color.set(guidata.circle1Color);
+            circle1TeleportedObject.material.color.set(guidata.circle1Color);
+            circle1TeleportedObject.children[0].material.color.set(guidata.circle1Color);
             circle2Object.material.color.set(guidata.circle2Color);
             circle2Object.children[0].material.color.set(guidata.circle2Color);
+            circle2TeleportedObject.material.color.set(guidata.circle2Color);
+            circle2TeleportedObject.children[0].material.color.set(guidata.circle2Color);
             meshHandle.init();
             updateVisualization();
         }
@@ -428,6 +432,8 @@
             if (linesObject4) scene.remove(linesObject4);
             if (circle1Object) scene.remove(circle1Object);
             if (circle2Object) scene.remove(circle2Object);
+            if (circle1TeleportedObject) scene.remove(circle1Object);
+            if (circle2TeleportedObject) scene.remove(circle2Object);
             
             // Create lines
             createLines();
@@ -590,6 +596,48 @@
                 opacity: 0.8 
             }));
             circle2Object.add(wireframe2Mesh);
+
+            // ---------------------------------------------------------------
+            {
+                // Create circle 1 (orange)
+                const circle1TeleportedGeometry = new THREE.CircleGeometry(1, circleLines);
+                const circle1TeleportedMaterial = new THREE.MeshBasicMaterial({ 
+                    color: guidata.circle1TeleportedColor,
+                    transparent: true,
+                    opacity: 0.2,
+                    side: THREE.DoubleSide
+                });
+                circle1TeleportedObject = new THREE.Mesh(circle1TeleportedGeometry, circle1TeleportedMaterial);
+                scene.add(circle1TeleportedObject);
+
+                // Create circle 2 (blue)
+                const circle2TeleportedGeometry = new THREE.CircleGeometry(1, circleLines);
+                const circle2TeleportedMaterial = new THREE.MeshBasicMaterial({ 
+                    color: guidata.circle2TeleportedColor,
+                    transparent: true,
+                    opacity: 0.2,
+                    side: THREE.DoubleSide
+                });
+                circle2TeleportedObject = new THREE.Mesh(circle2TeleportedGeometry, circle2TeleportedMaterial);
+                scene.add(circle2TeleportedObject);
+
+                // Also create wireframe versions for better visibility
+                const wireframe1Material = new THREE.RingGeometry(0.99, 1.01, circleLines);
+                const wireframe1Mesh = new THREE.Mesh(wireframe1Material, new THREE.MeshBasicMaterial({ 
+                    color: guidata.circle1TeleportedColor, 
+                    transparent: true, 
+                    opacity: 0.8 
+                }));
+                circle1TeleportedObject.add(wireframe1Mesh);
+
+                const wireframe2Material = new THREE.RingGeometry(0.99, 1.01, circleLines);
+                const wireframe2Mesh = new THREE.Mesh(wireframe2Material, new THREE.MeshBasicMaterial({ 
+                    color: guidata.circle2TeleportedColor, 
+                    transparent: true, 
+                    opacity: 0.8 
+                }));
+                circle2TeleportedObject.add(wireframe2Mesh);
+            }
         }
 
         function updateVisualization() {
@@ -613,6 +661,9 @@
                 // Update particle positions based on draw_reflections setting
                 if (guidata.draw_reflections) {
                     const thirdCount = particleCount / 3;
+
+                    circle1TeleportedObject.visible = true;
+                    circle2TeleportedObject.visible = true;
 
                     // Make sure all particle objects are visible when reflections are enabled
                     particlesObject.visible = true;
@@ -662,6 +713,9 @@
                     // Hide other particle objects by setting visibility to false
                     particlesObject2.visible = false;
                     particlesObject4.visible = false;
+
+                    circle1TeleportedObject.visible = false;
+                    circle2TeleportedObject.visible = false;
                 }
 
                 // Update lines
@@ -777,6 +831,18 @@
                 copyWasmData(circle2Ptr, circle2DataArray, 3);
                 circle2Object.position.set(circle2DataArray[0], circle2DataArray[1], 0);
                 circle2Object.scale.set(circle2DataArray[2], circle2DataArray[2], 1);
+
+                // Update circle 1 teleported
+                const circle1TeleportedPtr = meshHandle.get_circle1_teleported_data();
+                copyWasmData(circle1TeleportedPtr, circle1DataArray, 3);
+                circle1TeleportedObject.position.set(circle1DataArray[0], circle1DataArray[1], 0);
+                circle1TeleportedObject.scale.set(circle1DataArray[2], circle1DataArray[2], 1);
+
+                // Update circle 2 teleported
+                const circle2TeleportedPtr = meshHandle.get_circle2_teleported_data();
+                copyWasmData(circle2TeleportedPtr, circle2DataArray, 3);
+                circle2TeleportedObject.position.set(circle2DataArray[0], circle2DataArray[1], 0);
+                circle2TeleportedObject.scale.set(circle2DataArray[2], circle2DataArray[2], 1);
             } catch (error) {
                 console.error("Error updating circles:", error);
             }
@@ -834,10 +900,16 @@
             visualFolder.addColor(guidata, "circle1Color").onChange(value => {
                 circle1Object.material.color.set(value);
                 circle1Object.children[0].material.color.set(value);
+
+                circle1TeleportedObject.material.color.set(value);
+                circle1TeleportedObject.children[0].material.color.set(value);
             }).listen();
             visualFolder.addColor(guidata, "circle2Color").onChange(value => {
                 circle2Object.material.color.set(value);
                 circle2Object.children[0].material.color.set(value);
+
+                circle2TeleportedObject.material.color.set(value);
+                circle2TeleportedObject.children[0].material.color.set(value);
             }).listen();
 
             // Physics parameters

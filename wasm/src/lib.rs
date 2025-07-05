@@ -495,6 +495,8 @@ pub struct Mesh {
     lines_buffer: Vec<u32>,
     circle1data: Vec<f32>,
     circle2data: Vec<f32>,
+    circle1data_teleported: Vec<f32>,
+    circle2data_teleported: Vec<f32>,
     disable_lines_buffer: Vec<u8>,
 }
 
@@ -534,6 +536,8 @@ impl Mesh {
             lines_buffer: Vec::new(),
             circle1data: Vec::new(),
             circle2data: Vec::new(),
+            circle1data_teleported: Vec::new(),
+            circle2data_teleported: Vec::new(),
             disable_lines_buffer: Vec::new(),
         }
     }
@@ -927,6 +931,42 @@ impl Mesh {
         self.circle2data.push(self.portals.get_center2().x as f32);
         self.circle2data.push(self.portals.get_center2().y as f32);
         self.circle2data.push(self.portals.get_radius2() as f32);
+
+        self.circle1data_teleported.clear();
+        let center1 = self.portals.get_center1();
+        let radius1_teleported = self.portals.teleport_position(
+            center1 + center1.normalize() * self.portals.get_radius1(),
+            -1,
+        );
+        let radius1_teleported2 = self.portals.teleport_position(
+            center1 - center1.normalize() * self.portals.get_radius1(),
+            -1,
+        );
+        let center1_teleported = (radius1_teleported + radius1_teleported2) / 2.;
+        self.circle1data_teleported
+            .push(center1_teleported.x as f32);
+        self.circle1data_teleported
+            .push(center1_teleported.y as f32);
+        self.circle1data_teleported
+            .push((radius1_teleported - radius1_teleported2).length() as f32 / 2.);
+
+        self.circle2data_teleported.clear();
+        let center2 = self.portals.get_center2();
+        let radius2_teleported = self.portals.teleport_position(
+            center2 + center2.normalize() * self.portals.get_radius2(),
+            1,
+        );
+        let radius2_teleported2 = self.portals.teleport_position(
+            center2 - center2.normalize() * self.portals.get_radius2(),
+            1,
+        );
+        let center2_teleported = (radius2_teleported + radius2_teleported2) / 2.;
+        self.circle2data_teleported
+            .push(center2_teleported.x as f32);
+        self.circle2data_teleported
+            .push(center2_teleported.y as f32);
+        self.circle2data_teleported
+            .push((radius2_teleported - radius2_teleported2).length() as f32 / 2.);
     }
 
     pub fn get_particles_buffer(&mut self) -> *const f32 {
@@ -963,6 +1003,14 @@ impl Mesh {
 
     pub fn get_circle2_data(&mut self) -> *const f32 {
         self.circle2data.as_ptr()
+    }
+
+    pub fn get_circle1_teleported_data(&mut self) -> *const f32 {
+        self.circle1data_teleported.as_ptr()
+    }
+
+    pub fn get_circle2_teleported_data(&mut self) -> *const f32 {
+        self.circle2data_teleported.as_ptr()
     }
 }
 
@@ -1035,6 +1083,15 @@ impl MeshHandle {
     // Same, but for other circle
     pub fn get_circle2_data(&mut self) -> *const f32 {
         self.mesh.get_circle2_data()
+    }
+
+    pub fn get_circle1_teleported_data(&mut self) -> *const f32 {
+        self.mesh.get_circle1_teleported_data()
+    }
+
+    // Same, but for other circle
+    pub fn get_circle2_teleported_data(&mut self) -> *const f32 {
+        self.mesh.get_circle2_teleported_data()
     }
 }
 
