@@ -310,6 +310,7 @@
                 // Create renderer
                 renderer = new THREE.WebGLRenderer({ antialias: true });
                 renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
                 document.body.appendChild(renderer.domElement);
 
                 // Add ambient light
@@ -672,7 +673,6 @@
                     
                     // Update normal particles (first third)
                     const particlePositions = particlesObject.geometry.attributes.position.array;
-                    console.log(particlesObject.geometry.attributes.position.array.length);
                     for (let i = 0; i < thirdCount; i++) {
                         particlePositions[i * 3] = particleDataArray[i * 2];
                         particlePositions[i * 3 + 1] = particleDataArray[i * 2 + 1];
