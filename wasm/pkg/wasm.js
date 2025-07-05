@@ -171,6 +171,20 @@ export class MeshHandle {
         const ret = wasm.meshhandle_get_circle2_data(this.__wbg_ptr);
         return ret >>> 0;
     }
+    /**
+     * @returns {number}
+     */
+    get_circle1_teleported_data() {
+        const ret = wasm.meshhandle_get_circle1_teleported_data(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get_circle2_teleported_data() {
+        const ret = wasm.meshhandle_get_circle2_teleported_data(this.__wbg_ptr);
+        return ret >>> 0;
+    }
 }
 
 async function __wbg_load(module, imports) {
