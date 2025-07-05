@@ -489,6 +489,7 @@ pub struct Mesh {
     speed_x: fxx,
     speed_y: fxx,
     portal_type: u8,
+    draw_reflections: bool,
 
     particles_buffer: Vec<f32>,
     lines_buffer: Vec<u32>,
@@ -527,6 +528,7 @@ impl Mesh {
             speed_x: 0.5,
             speed_y: 0.,
             portal_type: 0,
+            draw_reflections: true,
 
             particles_buffer: Vec::new(),
             lines_buffer: Vec::new(),
@@ -758,6 +760,7 @@ impl Mesh {
             "edgeSpringConstant" => self.edge_spring_constant as f32,
             "dampingCoefficient" => self.damping_coefficient as f32,
             "globalDamping" => self.global_damping as f32,
+            "draw_reflections" => self.draw_reflections as u32 as f32,
 
             "scene_size" => self.size as f32,
             "scene_scale" => self.scale as f32,
@@ -777,6 +780,10 @@ impl Mesh {
             "edgeSpringConstant" => self.edge_spring_constant = value as fxx,
             "dampingCoefficient" => self.damping_coefficient = value as fxx,
             "globalDamping" => self.global_damping = value as fxx,
+            "draw_reflections" => {
+                self.draw_reflections = value > 0.5;
+                self.update_buffers();
+            }
 
             "scene_size" => {
                 self.size = value as usize;
@@ -818,10 +825,60 @@ impl Mesh {
             self.particles_buffer.push(p.position.y as f32);
         }
 
+        if self.draw_reflections {
+            for p in &self.particles {
+                let new_pos = self.portals.teleport_position(p.position, -1);
+                self.particles_buffer.push(new_pos.x as f32);
+                self.particles_buffer.push(new_pos.y as f32);
+            }
+
+            for p in &self.particles {
+                let new_pos = self.portals.teleport_position(p.position, 1);
+                self.particles_buffer.push(new_pos.x as f32);
+                self.particles_buffer.push(new_pos.y as f32);
+            }
+        }
+
         self.lines_buffer.clear();
         for spring in &self.springs {
             self.lines_buffer.push(spring.i as u32);
             self.lines_buffer.push(spring.j as u32);
+        }
+
+        if self.draw_reflections {
+            for spring in &self.springs {
+                if self.particles[spring.i].degree + 1 == self.particles[spring.j].degree {
+                    self.lines_buffer.push(spring.i as u32);
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 + spring.j as u32);
+                } else if self.particles[spring.i].degree == self.particles[spring.j].degree + 1 {
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 + spring.i as u32);
+                    self.lines_buffer.push(spring.j as u32);
+                } else {
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 + spring.i as u32);
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 + spring.j as u32);
+                }
+            }
+
+            for spring in &self.springs {
+                if self.particles[spring.i].degree + 1 == self.particles[spring.j].degree {
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 * 2 + spring.i as u32);
+                    self.lines_buffer.push(spring.j as u32);
+                } else if self.particles[spring.i].degree == self.particles[spring.j].degree + 1 {
+                    self.lines_buffer.push(spring.i as u32);
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 * 2 + spring.j as u32);
+                } else {
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 * 2 + spring.i as u32);
+                    self.lines_buffer
+                        .push(self.particles.len() as u32 * 2 + spring.j as u32);
+                }
+            }
         }
 
         self.disable_lines_buffer.clear();
@@ -831,6 +888,34 @@ impl Mesh {
                     || spring.died
                     || !spring.show) as u8,
             );
+        }
+
+        if self.draw_reflections {
+            for spring in &self.springs {
+                self.disable_lines_buffer.push(
+                    (if self.particles[spring.i].degree != self.particles[spring.j].degree {
+                        (self.particles[spring.i].degree - self.particles[spring.j].degree).abs()
+                            != 1
+                    } else {
+                        false
+                    } || spring.died
+                        || !spring.show) as u8
+                        + 2,
+                );
+            }
+
+            for spring in &self.springs {
+                self.disable_lines_buffer.push(
+                    (if self.particles[spring.i].degree != self.particles[spring.j].degree {
+                        (self.particles[spring.i].degree - self.particles[spring.j].degree).abs()
+                            != 1
+                    } else {
+                        false
+                    } || spring.died
+                        || !spring.show) as u8
+                        + 4,
+                );
+            }
         }
 
         self.circle1data.clear();
@@ -849,7 +934,11 @@ impl Mesh {
     }
 
     pub fn get_particles_count(&self) -> u32 {
-        self.particles.len() as u32
+        if self.draw_reflections {
+            self.particles.len() as u32 * 3
+        } else {
+            self.particles.len() as u32
+        }
     }
 
     pub fn get_lines_buffer(&mut self) -> *const u32 {
@@ -861,7 +950,11 @@ impl Mesh {
     }
 
     pub fn get_lines_count(&mut self) -> u32 {
-        self.springs.len() as u32
+        if self.draw_reflections {
+            self.springs.len() as u32 * 3
+        } else {
+            self.springs.len() as u32
+        }
     }
 
     pub fn get_circle1_data(&mut self) -> *const f32 {
