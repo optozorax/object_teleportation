@@ -41,8 +41,8 @@
         // Global variables
         let scene, camera, renderer, controls;
         let meshHandle; // WASM handle
-        let particlesObject; // THREE.js points object
-        let linesObject; // THREE.js lines object
+        let particlesObject, particlesObject2, particlesObject4; // THREE.js points objects
+        let linesObject, linesObject2, linesObject4; // THREE.js lines objects
         let circle1Object, circle2Object; // Circle objects
         let gridHelper, axesHelper; // Debug helpers
         let coordinateLabels = []; // Text labels for coordinates
@@ -80,19 +80,24 @@
             scene: "default",
             particleSize: 2.5,
             particleColor: '#0ea100',
+            line2Color: '#931f1f',
+            line4Color: '#5032cc',
             lineWidth: 1,
             circle1Color: '#ff8800',
             circle2Color: '#0088ff',
             showDebugGrid: false,
-            cameraScale: 5.0
+            cameraScale: 5.0,
+            draw_reflections: true,
         };
 
         const guidata_copy = {
-            guidata_particleSize: 2.5,
-            guidata_particleColor: '#0ea100',
-            guidata_lineWidth: 1,
-            guidata_circle1Color: '#ff8800',
-            guidata_circle2Color: '#0088ff',
+            guidata_particleSize: guidata["particleSize"],
+            guidata_particleColor: guidata["particleColor"],
+            guidata_line2Color: guidata["line2Color"],
+            guidata_line4Color: guidata["line4Color"],
+            guidata_lineWidth: guidata["lineWidth"],
+            guidata_circle1Color: guidata["circle1Color"],
+            guidata_circle2Color: guidata["circle2Color"],
         };
 
         // Initialize pre-allocated arrays
@@ -255,7 +260,11 @@
                 }
             }
             particlesObject.material.color.set(guidata.particleColor);
+            particlesObject2.material.color.set(guidata.line2Color);
+            particlesObject4.material.color.set(guidata.line4Color);
             linesObject.material.color.set(guidata.particleColor);
+            linesObject2.material.color.set(guidata.line2Color);
+            linesObject4.material.color.set(guidata.line4Color);
             circle1Object.material.color.set(guidata.circle1Color);
             circle1Object.children[0].material.color.set(guidata.circle1Color);
             circle2Object.material.color.set(guidata.circle2Color);
@@ -412,7 +421,11 @@
         function createVisualizationObjects() {
             // Remove existing objects if any
             if (particlesObject) scene.remove(particlesObject);
+            if (particlesObject2) scene.remove(particlesObject2);
+            if (particlesObject4) scene.remove(particlesObject4);
             if (linesObject) scene.remove(linesObject);
+            if (linesObject2) scene.remove(linesObject2);
+            if (linesObject4) scene.remove(linesObject4);
             if (circle1Object) scene.remove(circle1Object);
             if (circle2Object) scene.remove(circle2Object);
             
@@ -427,48 +440,113 @@
         }
 
         function createParticles() {
-            const particleCount = meshHandle.get_particles_count();
+            let particleCount = meshHandle.get_particles_count();
+            if (guidata.draw_reflections) {
+                particleCount /= 3;
+            }
             
-            // Create geometry for particles
+            // Create geometry for normal particles
             const geometry = new THREE.BufferGeometry();
             const positions = new Float32Array(particleCount * 3); // x, y, z (z will be 0)
-            
-            // Set initial positions (will be updated from WASM)
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             
-            // Create material for particles
+            // Create material for normal particles
             const material = new THREE.PointsMaterial({
                 color: guidata.particleColor,
                 size: guidata.particleSize,
                 sizeAttenuation: false
             });
             
-            // Create points object
+            // Create points object for normal particles
             particlesObject = new THREE.Points(geometry, material);
             particlesObject.frustumCulled = false;
             scene.add(particlesObject);
+
+            // Create geometry for type 2 particles
+            const geometry2 = new THREE.BufferGeometry();
+            const positions2 = new Float32Array(particleCount * 3);
+            geometry2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
+            
+            // Create material for type 2 particles
+            const material2 = new THREE.PointsMaterial({
+                color: guidata.line2Color,
+                size: guidata.particleSize,
+                sizeAttenuation: false
+            });
+            
+            // Create points object for type 2 particles
+            particlesObject2 = new THREE.Points(geometry2, material2);
+            particlesObject2.frustumCulled = false;
+            scene.add(particlesObject2);
+
+            // Create geometry for type 4 particles
+            const geometry4 = new THREE.BufferGeometry();
+            const positions4 = new Float32Array(particleCount * 3);
+            geometry4.setAttribute('position', new THREE.BufferAttribute(positions4, 3));
+            
+            // Create material for type 4 particles
+            const material4 = new THREE.PointsMaterial({
+                color: guidata.line4Color,
+                size: guidata.particleSize,
+                sizeAttenuation: false
+            });
+            
+            // Create points object for type 4 particles
+            particlesObject4 = new THREE.Points(geometry4, material4);
+            particlesObject4.frustumCulled = false;
+            scene.add(particlesObject4);
         }
 
         function createLines() {
             const lineCount = meshHandle.get_lines_count();
             
-            // Create geometry for lines (we'll filter out disabled lines during update)
+            // Create geometry for normal lines (type 0)
             const geometry = new THREE.BufferGeometry();
             const positions = new Float32Array(lineCount * 2 * 3); // 2 vertices per line, 3 coords per vertex
-            
-            // Set initial positions (will be updated from WASM)
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             
-            // Create material for lines
+            // Create material for normal lines
             const material = new THREE.LineBasicMaterial({
                 color: guidata.particleColor,
                 linewidth: guidata.lineWidth
             });
             
-            // Create line segments object
+            // Create line segments object for normal lines
             linesObject = new THREE.LineSegments(geometry, material);
             linesObject.frustumCulled = false;
             scene.add(linesObject);
+
+            // Create geometry for type 2 lines
+            const geometry2 = new THREE.BufferGeometry();
+            const positions2 = new Float32Array(lineCount * 2 * 3);
+            geometry2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
+            
+            // Create material for type 2 lines
+            const material2 = new THREE.LineBasicMaterial({
+                color: guidata.line2Color,
+                linewidth: guidata.lineWidth
+            });
+            
+            // Create line segments object for type 2 lines
+            linesObject2 = new THREE.LineSegments(geometry2, material2);
+            linesObject2.frustumCulled = false;
+            scene.add(linesObject2);
+
+            // Create geometry for type 4 lines
+            const geometry4 = new THREE.BufferGeometry();
+            const positions4 = new Float32Array(lineCount * 2 * 3);
+            geometry4.setAttribute('position', new THREE.BufferAttribute(positions4, 3));
+            
+            // Create material for type 4 lines
+            const material4 = new THREE.LineBasicMaterial({
+                color: guidata.line4Color,
+                linewidth: guidata.lineWidth
+            });
+            
+            // Create line segments object for type 4 lines
+            linesObject4 = new THREE.LineSegments(geometry4, material4);
+            linesObject4.frustumCulled = false;
+            scene.add(linesObject4);
         }
 
         function createCircles() {
@@ -520,34 +598,81 @@
                 const particleCount = meshHandle.get_particles_count();
                 const particlesPtr = meshHandle.get_particles_buffer();
 
-                // Handle dynamic line count - recreate particle object if needed
-                const expectedParticlesVertices = particleCount * 3; // 2 vertices per line, 3 coords per vertex
+                // Handle dynamic particle count - recreate particle objects if needed
+                const expectedParticlesVertices = particleCount * 3;
                 if (particlesObject.geometry.attributes.position.array.length !== expectedParticlesVertices) {
-                    // Recreate lines object with new size
                     scene.remove(particlesObject);
+                    scene.remove(particlesObject2);
+                    scene.remove(particlesObject4);
                     createParticles();
                 }
                 
                 // Copy particle data to pre-allocated array
                 copyWasmData(particlesPtr, particleDataArray, particleCount * 2);
                 
-                // Update particle positions
-                const particlePositions = particlesObject.geometry.attributes.position.array;
-                for (let i = 0; i < particleCount; i++) {
-                    particlePositions[i * 3] = particleDataArray[i * 2];       // x
-                    particlePositions[i * 3 + 1] = particleDataArray[i * 2 + 1]; // y
-                    particlePositions[i * 3 + 2] = 0;                          // z = 0
+                // Update particle positions based on draw_reflections setting
+                if (guidata.draw_reflections) {
+                    const thirdCount = particleCount / 3;
+
+                    // Make sure all particle objects are visible when reflections are enabled
+                    particlesObject.visible = true;
+                    particlesObject2.visible = true;
+                    particlesObject4.visible = true;
+                    
+                    // Update normal particles (first third)
+                    const particlePositions = particlesObject.geometry.attributes.position.array;
+                    console.log(particlesObject.geometry.attributes.position.array.length);
+                    for (let i = 0; i < thirdCount; i++) {
+                        particlePositions[i * 3] = particleDataArray[i * 2];
+                        particlePositions[i * 3 + 1] = particleDataArray[i * 2 + 1];
+                        particlePositions[i * 3 + 2] = 0;
+                    }
+                    particlesObject.geometry.attributes.position.needsUpdate = true;
+                    
+                    // Update type 2 particles (second third)
+                    const particlePositions2 = particlesObject2.geometry.attributes.position.array;
+                    for (let i = 0; i < thirdCount; i++) {
+                        const sourceIndex = Math.floor(thirdCount) + i;
+                        particlePositions2[i * 3] = particleDataArray[sourceIndex * 2];
+                        particlePositions2[i * 3 + 1] = particleDataArray[sourceIndex * 2 + 1];
+                        particlePositions2[i * 3 + 2] = 0;
+                    }
+                    particlesObject2.geometry.attributes.position.needsUpdate = true;
+                    
+                    // Update type 4 particles (third third)
+                    const particlePositions4 = particlesObject4.geometry.attributes.position.array;
+                    for (let i = 0; i < thirdCount; i++) {
+                        const sourceIndex = Math.floor(thirdCount * 2) + i;
+                        particlePositions4[i * 3] = particleDataArray[sourceIndex * 2];
+                        particlePositions4[i * 3 + 1] = particleDataArray[sourceIndex * 2 + 1];
+                        particlePositions4[i * 3 + 2] = 0;
+                    }
+                    particlesObject4.geometry.attributes.position.needsUpdate = true;
+                } else {
+                    // Only show normal particles when reflections are disabled
+                    particlesObject.visible = true;
+                    const particlePositions = particlesObject.geometry.attributes.position.array;
+                    for (let i = 0; i < particleCount; i++) {
+                        particlePositions[i * 3] = particleDataArray[i * 2];
+                        particlePositions[i * 3 + 1] = particleDataArray[i * 2 + 1];
+                        particlePositions[i * 3 + 2] = 0;
+                    }
+                    particlesObject.geometry.attributes.position.needsUpdate = true;
+                    
+                    // Hide other particle objects by setting visibility to false
+                    particlesObject2.visible = false;
+                    particlesObject4.visible = false;
                 }
-                particlesObject.geometry.attributes.position.needsUpdate = true;
 
                 // Update lines
                 const lineCount = meshHandle.get_lines_count();
                 
-                // Handle dynamic line count - recreate line object if needed
-                const expectedLineVertices = lineCount * 2 * 3; // 2 vertices per line, 3 coords per vertex
+                // Handle dynamic line count - recreate line objects if needed
+                const expectedLineVertices = lineCount * 2 * 3;
                 if (linesObject.geometry.attributes.position.array.length !== expectedLineVertices) {
-                    // Recreate lines object with new size
                     scene.remove(linesObject);
+                    scene.remove(linesObject2);
+                    scene.remove(linesObject4);
                     createLines();
                 }
                 
@@ -558,35 +683,78 @@
                 copyWasmData(linesPtr, lineIndicesArray, lineCount * 2);
                 copyWasmData(disabledLinesPtr, disabledLinesArray, lineCount);
 
-                // Update line positions based on particle positions
+                // Update line positions based on line type
                 const linePositions = linesObject.geometry.attributes.position.array;
+                const linePositions2 = linesObject2.geometry.attributes.position.array;
+                const linePositions4 = linesObject4.geometry.attributes.position.array;
+                
+                // All line objects are always visible - their content is controlled by the loop below
+                linesObject.visible = true;
+                linesObject2.visible = true;
+                linesObject4.visible = true;
+                
                 for (let i = 0; i < lineCount; i++) {
                     const idx1 = lineIndicesArray[i * 2];
                     const idx2 = lineIndicesArray[i * 2 + 1];
+                    const lineType = disabledLinesArray[i];
                     
-                    if (disabledLinesArray[i] === 1) {
-                        // Hide disabled line by setting all vertices to the same point
-                        linePositions[i * 6] = 0;     // x1
-                        linePositions[i * 6 + 1] = 0; // y1
-                        linePositions[i * 6 + 2] = 0; // z1
+                    // Reset all line positions to origin first
+                    linePositions[i * 6] = 0;
+                    linePositions[i * 6 + 1] = 0;
+                    linePositions[i * 6 + 2] = 0;
+                    linePositions[i * 6 + 3] = 0;
+                    linePositions[i * 6 + 4] = 0;
+                    linePositions[i * 6 + 5] = 0;
+                    
+                    linePositions2[i * 6] = 0;
+                    linePositions2[i * 6 + 1] = 0;
+                    linePositions2[i * 6 + 2] = 0;
+                    linePositions2[i * 6 + 3] = 0;
+                    linePositions2[i * 6 + 4] = 0;
+                    linePositions2[i * 6 + 5] = 0;
+                    
+                    linePositions4[i * 6] = 0;
+                    linePositions4[i * 6 + 1] = 0;
+                    linePositions4[i * 6 + 2] = 0;
+                    linePositions4[i * 6 + 3] = 0;
+                    linePositions4[i * 6 + 4] = 0;
+                    linePositions4[i * 6 + 5] = 0;
+                    
+                    if (lineType === 1 || lineType === 3 || lineType === 5) {
+                        // Hide disabled lines (already set to origin above)
+                        continue;
+                    } else if (lineType === 0) {
+                        // Show normal lines
+                        linePositions[i * 6] = particleDataArray[idx1 * 2];
+                        linePositions[i * 6 + 1] = particleDataArray[idx1 * 2 + 1];
+                        linePositions[i * 6 + 2] = 0;
                         
-                        linePositions[i * 6 + 3] = 0; // x2
-                        linePositions[i * 6 + 4] = 0; // y2
-                        linePositions[i * 6 + 5] = 0; // z2
-                    } else {
-                        // Show enabled line with proper positions
-                        // First vertex of line
-                        linePositions[i * 6] = particleDataArray[idx1 * 2];       // x1
-                        linePositions[i * 6 + 1] = particleDataArray[idx1 * 2 + 1]; // y1
-                        linePositions[i * 6 + 2] = 0;                              // z1 = 0
+                        linePositions[i * 6 + 3] = particleDataArray[idx2 * 2];
+                        linePositions[i * 6 + 4] = particleDataArray[idx2 * 2 + 1];
+                        linePositions[i * 6 + 5] = 0;
+                    } else if (lineType === 2) {
+                        // Show type 2 lines
+                        linePositions2[i * 6] = particleDataArray[idx1 * 2];
+                        linePositions2[i * 6 + 1] = particleDataArray[idx1 * 2 + 1];
+                        linePositions2[i * 6 + 2] = 0;
                         
-                        // Second vertex of line
-                        linePositions[i * 6 + 3] = particleDataArray[idx2 * 2];       // x2
-                        linePositions[i * 6 + 4] = particleDataArray[idx2 * 2 + 1]; // y2
-                        linePositions[i * 6 + 5] = 0;                              // z2 = 0
+                        linePositions2[i * 6 + 3] = particleDataArray[idx2 * 2];
+                        linePositions2[i * 6 + 4] = particleDataArray[idx2 * 2 + 1];
+                        linePositions2[i * 6 + 5] = 0;
+                    } else if (lineType === 4) {
+                        // Show type 4 lines
+                        linePositions4[i * 6] = particleDataArray[idx1 * 2];
+                        linePositions4[i * 6 + 1] = particleDataArray[idx1 * 2 + 1];
+                        linePositions4[i * 6 + 2] = 0;
+                        
+                        linePositions4[i * 6 + 3] = particleDataArray[idx2 * 2];
+                        linePositions4[i * 6 + 4] = particleDataArray[idx2 * 2 + 1];
+                        linePositions4[i * 6 + 5] = 0;
                     }
                 }
                 linesObject.geometry.attributes.position.needsUpdate = true;
+                linesObject2.geometry.attributes.position.needsUpdate = true;
+                linesObject4.geometry.attributes.position.needsUpdate = true;
 
                 // Update circles
                 updateCircles();
@@ -617,11 +785,11 @@
         function setupGUI() {
             const gui = new dat.GUI();
 
-            gui.add(guidata, "run_simulation");
+            gui.add(guidata, "run_simulation").name("Run simulation");
 
             gui.add(guidata, "scene", Object.keys(scenes)).onChange(value => {
                 initScene();
-            });
+            }).name("Scene");
 
             var obj = { add:function(){ 
                 meshHandle.init();
@@ -637,16 +805,31 @@
                 if (value) {
                     createCoordinateLabels();
                 }
-            });
+            }).name("Show debug grid");
+
+            gui.add(guidata, "draw_reflections").onChange(value => {
+                meshHandle.set_constant("draw_reflections", (+value) + 0.0);
+                updateVisualization();
+            }).name("Draw reflections").listen();
 
             // Visual settings
             const visualFolder = gui.addFolder("Visual Settings");
             visualFolder.add(guidata, "particleSize", 0.0, 10.0, 0.01).onChange(value => {
                 particlesObject.material.size = value;
+                particlesObject2.material.size = value;
+                particlesObject4.material.size = value;
             }).listen();
             visualFolder.addColor(guidata, "particleColor").onChange(value => {
                 particlesObject.material.color.set(value);
                 linesObject.material.color.set(value);
+            }).listen();
+            visualFolder.addColor(guidata, "line2Color").onChange(value => {
+                particlesObject2.material.color.set(value);
+                linesObject2.material.color.set(value);
+            }).listen();
+            visualFolder.addColor(guidata, "line4Color").onChange(value => {
+                particlesObject4.material.color.set(value);
+                linesObject4.material.color.set(value);
             }).listen();
             visualFolder.addColor(guidata, "circle1Color").onChange(value => {
                 circle1Object.material.color.set(value);
