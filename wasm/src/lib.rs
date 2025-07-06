@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 
 #[allow(non_camel_case_types)]
 pub type fxx = f64;
+const PI: f64 = std::f64::consts::PI;
 pub type Vector2 = glam::DVec2;
 pub type Vector3 = glam::DVec3;
 pub type Matrix3 = glam::DMat3;
@@ -490,6 +491,13 @@ pub struct Mesh {
     speed_y: fxx,
     portal_type: u8,
     draw_reflections: bool,
+    portal1_x: fxx,
+    portal1_y: fxx,
+    portal1_angle: fxx,
+    portal2_x: fxx,
+    portal2_y: fxx,
+    portal2_angle: fxx,
+    mirror_portals: bool,
 
     particles_buffer: Vec<f32>,
     lines_buffer: Vec<u32>,
@@ -505,18 +513,7 @@ impl Mesh {
         Self {
             particles: Vec::new(),
             springs: Vec::new(),
-            portals: Portals::new(
-                Matrix3::from_scale_angle_translation(
-                    Vector2::new(1., 1.),
-                    0.,
-                    Vector2::new(-1.5, 0.),
-                ),
-                Matrix3::from_scale_angle_translation(
-                    Vector2::new(-1., 1.),
-                    0.,
-                    Vector2::new(1.5, 0.),
-                ),
-            ),
+            portals: Portals::new(Matrix3::IDENTITY, Matrix3::IDENTITY),
 
             dt: 0.01,
             edge_spring_constant: 50.0,
@@ -531,6 +528,13 @@ impl Mesh {
             speed_y: 0.,
             portal_type: 0,
             draw_reflections: true,
+            portal1_x: -1.5,
+            portal1_y: 0.,
+            portal1_angle: 0.,
+            portal2_x: 1.5,
+            portal2_y: 0.,
+            portal2_angle: 0.,
+            mirror_portals: true,
 
             particles_buffer: Vec::new(),
             lines_buffer: Vec::new(),
@@ -546,6 +550,22 @@ impl Mesh {
         // Clear existing data
         self.particles.clear();
         self.springs.clear();
+        self.portals = Portals::new(
+            Matrix3::from_scale_angle_translation(
+                Vector2::new(1., 1.),
+                self.portal1_angle * PI,
+                Vector2::new(self.portal1_x, self.portal1_y),
+            ),
+            Matrix3::from_scale_angle_translation(
+                if self.mirror_portals {
+                    Vector2::new(-1., 1.)
+                } else {
+                    Vector2::new(1., 1.)
+                },
+                self.portal2_angle * PI,
+                Vector2::new(self.portal2_x, self.portal2_y),
+            ),
+        );
         self.portals.portal_type = self.portal_type;
 
         for i in 0..self.size {
@@ -685,7 +705,7 @@ impl Mesh {
                 .move_particle(p, position_change * (self.dt / 6.0));
         }
 
-        let spring_die_factor = 5.;
+        let spring_die_factor = 4.;
         for spring in &mut self.springs {
             if !spring.died {
                 let p1 = &self.particles[spring.i];
@@ -774,6 +794,14 @@ impl Mesh {
             "scene_speed_y" => self.speed_y as f32,
             "scene_prtal_type" => self.portal_type as f32,
 
+            "scene_portal1_x" => self.portal1_x as f32,
+            "scene_portal1_y" => self.portal1_y as f32,
+            "scene_portal1_angle" => self.portal1_angle as f32,
+            "scene_portal2_x" => self.portal2_x as f32,
+            "scene_portal2_y" => self.portal2_y as f32,
+            "scene_portal2_angle" => self.portal2_angle as f32,
+            "scene_mirror_portals" => self.mirror_portals as u32 as f32,
+
             _ => -100500.,
         }
     }
@@ -815,6 +843,35 @@ impl Mesh {
             }
             "scene_portal_type" => {
                 self.portal_type = value as u8;
+                self.init();
+            }
+
+            "scene_portal1_x" => {
+                self.portal1_x = value as fxx;
+                self.init();
+            }
+            "scene_portal1_y" => {
+                self.portal1_y = value as fxx;
+                self.init();
+            }
+            "scene_portal1_angle" => {
+                self.portal1_angle = value as fxx;
+                self.init();
+            }
+            "scene_portal2_x" => {
+                self.portal2_x = value as fxx;
+                self.init();
+            }
+            "scene_portal2_y" => {
+                self.portal2_y = value as fxx;
+                self.init();
+            }
+            "scene_portal2_angle" => {
+                self.portal2_angle = value as fxx;
+                self.init();
+            }
+            "scene_mirror_portals" => {
+                self.mirror_portals = value as u32 == 1;
                 self.init();
             }
 

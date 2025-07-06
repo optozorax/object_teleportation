@@ -66,6 +66,7 @@
             dampingCoefficient: 10.0,
             globalDamping: 0.01,
             iterations: 30,
+
             scene_size: 30,
             scene_scale: 1.,
             scene_offset_x: -4.,
@@ -73,6 +74,14 @@
             scene_speed_x: 0.5,
             scene_speed_y: 0.,
             scene_portal_type: 0.,
+
+            scene_portal1_x: -1.5,
+            scene_portal1_y: 0.,
+            scene_portal1_angle: 0.,
+            scene_portal2_x: 1.5,
+            scene_portal2_y: 0.,
+            scene_portal2_angle: 0.,
+            scene_mirror_portals: 1.,
         };
 
         const guidata = {
@@ -203,10 +212,39 @@
                 ...guidata_copy,
                 scene_offset_x: -1.5,
             },
+            "kiss": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal1_x: -1.01,
+                scene_portal2_x: 1.01,
+                scene_portal1_angle: 1.,
+            },
+            "monoportal": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal1_x: 0.,
+                scene_portal2_x: 0.,
+                scene_offset_x: -2.,
+            },
+            "monoportal inside": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal1_x: 0.,
+                scene_portal2_x: 0.,
+                scene_offset_x: 0.,
+            },
+            "wrong intersection": {
+                ...constants,
+                ...guidata_copy,
+                scene_portal1_x: -0.95,
+                scene_portal2_x: 0.95,
+                scene_portal1_angle: 1.,
+            },
             "regular portal": {
                 ...constants,
                 ...guidata_copy,
                 scene_portal_type: 2.,
+                scene_mirror_portals: 0.,
 
                 guidata_circle1Color: "#8b8b8b",
                 guidata_circle2Color: "#ffffff",
@@ -936,7 +974,15 @@
                     "scene_offset_y": [-5, 5, 0.01, "Offset.y"],
                     "scene_speed_x": [-5, 5, 0.01, "Speed.x"],
                     "scene_speed_y": [-5, 5, 0.01, "Speed.y"],
-                    "scene_portal_type": [0, 2, 1, "Portal type"]
+                    "scene_portal_type": [0, 2, 1, "Portal type"],
+
+                    "scene_portal1_x": [-5, 5, 0.01, "Portal1.x"],
+                    "scene_portal1_y": [-5, 5, 0.01, "Portal1.y"],
+                    "scene_portal1_angle": [0, 2., 0.01, "Portal1.angle"],
+                    "scene_portal2_x": [-5, 5, 0.01, "Portal2.x"],
+                    "scene_portal2_y": [-5, 5, 0.01, "Portal2.y"],
+                    "scene_portal2_angle": [0, 2., 0.01, "Portal2.angle"],
+                    "scene_mirror_portals": [0, 1, 1, "Mirror portals"],
                 };
 
                 if (name in clamps) {
