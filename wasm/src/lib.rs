@@ -816,6 +816,21 @@ impl PhysicsSystem {
 
         particles
     }
+
+    fn kill_springs(&mut self, particles: &[Particle]) {
+        let spring_die_factor = 4.0;
+        for spring in &mut self.springs {
+            if !spring.died {
+                let p1 = &particles[spring.i];
+                let p2 = &particles[spring.j];
+                if p1.degree == p2.degree
+                    && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor
+                {
+                    spring.died = true;
+                }
+            }
+        }
+    }
 }
 
 // =============== Generic RK4 ===============
@@ -913,19 +928,7 @@ impl Mesh {
             &mut self.rk_ws,
         );
 
-        // Post-step: spring death rule
-        let spring_die_factor = 4.0;
-        for spring in &mut self.system.springs {
-            if !spring.died {
-                let p1 = &self.particles[spring.i];
-                let p2 = &self.particles[spring.j];
-                if p1.degree == p2.degree
-                    && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor
-                {
-                    spring.died = true;
-                }
-            }
-        }
+        self.system.kill_springs(&self.particles);
     }
 }
 
