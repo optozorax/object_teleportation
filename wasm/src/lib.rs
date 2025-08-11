@@ -25,6 +25,40 @@ pub struct Portal {
     pub portal2_inv: DMat3,
 }
 
+#[derive(Clone, Debug)]
+pub struct CircleCollider {
+    pub transform: DMat3,
+    pub transform_inv: DMat3,
+}
+
+impl CircleCollider {
+    pub fn new(transform: DMat3) -> Self {
+        Self {
+            transform_inv: transform.inverse(),
+            transform,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RectCollider {
+    pub transform: DMat3,
+    pub transform_inv: DMat3,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl RectCollider {
+    pub fn new(transform: DMat3, width: f64, height: f64) -> Self {
+        Self {
+            transform_inv: transform.inverse(),
+            transform,
+            width,
+            height,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RayInner {
     pub o: DVec2,
@@ -520,7 +554,51 @@ fn teleport_direction_full(portal: &Portal, pos: DVec2, dir: DVec2, mut degree: 
     dir.xy()
 }
 
-fn move_particle(portals: &[Portal], particle: &mut Particle, offset: DVec2) {
+fn collide_circle(c: &CircleCollider, particle: &mut Particle) {
+    let local_pos = c.transform_inv.transform_point2(particle.position);
+    let dist2 = local_pos.length_squared();
+    if dist2 < 1.0 {
+        let normal = if dist2 > 0.0 {
+            local_pos.normalize()
+        } else {
+            DVec2::X
+        };
+        let local_pos = normal;
+        let local_vel = c.transform_inv.transform_vector2(particle.velocity);
+        let reflected = local_vel - 2.0 * local_vel.dot(normal) * normal;
+        particle.position = c.transform.transform_point2(local_pos);
+        particle.velocity = c.transform.transform_vector2(reflected);
+    }
+}
+
+fn collide_rect(r: &RectCollider, particle: &mut Particle) {
+    let mut local_pos = r.transform_inv.transform_point2(particle.position);
+    let half_w = r.width * 0.5;
+    let half_h = r.height * 0.5;
+    if local_pos.x.abs() <= half_w && local_pos.y.abs() <= half_h {
+        let dx = half_w - local_pos.x.abs();
+        let dy = half_h - local_pos.y.abs();
+        let normal = if dx < dy {
+            local_pos.x = half_w * local_pos.x.signum();
+            DVec2::new(local_pos.x.signum(), 0.0)
+        } else {
+            local_pos.y = half_h * local_pos.y.signum();
+            DVec2::new(0.0, local_pos.y.signum())
+        };
+        let local_vel = r.transform_inv.transform_vector2(particle.velocity);
+        let reflected = local_vel - 2.0 * local_vel.dot(normal) * normal;
+        particle.position = r.transform.transform_point2(local_pos);
+        particle.velocity = r.transform.transform_vector2(reflected);
+    }
+}
+
+fn move_particle(
+    portals: &[Portal],
+    circles: &[CircleCollider],
+    rects: &[RectCollider],
+    particle: &mut Particle,
+    offset: DVec2,
+) {
     let ray = RayInner::new(particle.position, offset);
 
     let res = portals
@@ -540,6 +618,13 @@ fn move_particle(portals: &[Portal], particle: &mut Particle, offset: DVec2) {
         }
     } else {
         particle.position += offset;
+    }
+
+    for c in circles {
+        collide_circle(c, particle);
+    }
+    for r in rects {
+        collide_rect(r, particle);
     }
 }
 
@@ -681,6 +766,8 @@ fn calc_forces(
 struct PhysicsSystem {
     springs: Vec<EdgeSpring>,
     portals: Vec<Portal>,
+    circle_colliders: Vec<CircleCollider>,
+    rect_colliders: Vec<RectCollider>,
 
     // Simulation constants
     dt: f64,
@@ -696,6 +783,8 @@ impl Default for PhysicsSystem {
         PhysicsSystem {
             springs: Vec::new(),
             portals: vec![Portal::new(DMat3::IDENTITY, DMat3::IDENTITY, 0)],
+            circle_colliders: Vec::new(),
+            rect_colliders: Vec::new(),
 
             dt: 0.01,
             edge_spring_constant: 50.0,
@@ -711,6 +800,8 @@ impl PhysicsSystem {
     fn init(
         &mut self,
         portals: Vec<Portal>,
+        circles: Vec<CircleCollider>,
+        rects: Vec<RectCollider>,
         size: usize,
         scale: f64,
         offset: DVec2,
@@ -719,6 +810,8 @@ impl PhysicsSystem {
         // Clear existing data
         self.springs.clear();
         self.portals = portals;
+        self.circle_colliders = circles;
+        self.rect_colliders = rects;
 
         let mut particles = vec![];
 
@@ -917,6 +1010,8 @@ impl Mesh {
 
         let ops = ParticleOps {
             portals: &self.system.portals,
+            circles: &self.system.circle_colliders,
+            rects: &self.system.rect_colliders,
         };
 
         rk4_step(
@@ -975,6 +1070,8 @@ impl ODESystem<Vec<Particle>, Vec<Deriv2>> for PhysicsSystem {
 // RKOps for Vec<Particle> / Vec<Deriv2>
 pub struct ParticleOps<'a> {
     pub portals: &'a [Portal],
+    pub circles: &'a [CircleCollider],
+    pub rects: &'a [RectCollider],
 }
 
 impl<'a> RKOps<Vec<Particle>, Vec<Deriv2>> for ParticleOps<'a> {
@@ -1026,7 +1123,7 @@ impl<'a> RKOps<Vec<Particle>, Vec<Deriv2>> for ParticleOps<'a> {
         for (p, k) in state.iter_mut().zip(combined.iter()) {
             p.velocity += k.dv * s;
             let offset = k.dp * s;
-            move_particle(self.portals, p, offset); // portals only here
+            move_particle(self.portals, self.circles, self.rects, p, offset);
         }
     }
 }
@@ -1137,24 +1234,39 @@ impl Mesh {
     }
 
     pub fn init(&mut self) {
+        let portals = vec![Portal::new(
+            DMat3::from_scale_angle_translation(
+                DVec2::new(1., 1.),
+                self.portal1_angle * PI,
+                DVec2::new(self.portal1_x, self.portal1_y),
+            ),
+            DMat3::from_scale_angle_translation(
+                if self.mirror_portals {
+                    DVec2::new(-1., 1.)
+                } else {
+                    DVec2::new(1., 1.)
+                },
+                self.portal2_angle * PI,
+                DVec2::new(self.portal2_x, self.portal2_y),
+            ),
+            self.portal_type,
+        )];
+
+        let circles = vec![CircleCollider::new(DMat3::from_scale_angle_translation(
+            DVec2::splat(0.3),
+            0.0,
+            DVec2::new(-0.5, 0.0),
+        ))];
+        let rects = vec![RectCollider::new(
+            DMat3::from_scale_angle_translation(DVec2::new(1., 1.), 0.0, DVec2::new(0.5, 0.0)),
+            0.6,
+            0.4,
+        )];
+
         self.particles = self.system.init(
-            vec![Portal::new(
-                DMat3::from_scale_angle_translation(
-                    DVec2::new(1., 1.),
-                    self.portal1_angle * PI,
-                    DVec2::new(self.portal1_x, self.portal1_y),
-                ),
-                DMat3::from_scale_angle_translation(
-                    if self.mirror_portals {
-                        DVec2::new(-1., 1.)
-                    } else {
-                        DVec2::new(1., 1.)
-                    },
-                    self.portal2_angle * PI,
-                    DVec2::new(self.portal2_x, self.portal2_y),
-                ),
-                self.portal_type,
-            )],
+            portals,
+            circles,
+            rects,
             self.size,
             self.scale,
             DVec2::new(self.offset_x, self.offset_y),
