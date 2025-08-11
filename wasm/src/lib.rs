@@ -333,11 +333,10 @@ pub fn intersect_portal(
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Particle {
     pub position: DVec2,
     pub velocity: DVec2,
-    pub force: DVec2,
     pub degree: [i8; 5], // max 5 portals
 }
 
@@ -346,7 +345,6 @@ impl Particle {
         Self {
             position: DVec2::new(x, y),
             velocity: DVec2::new(0.0, 0.0),
-            force: DVec2::new(0.0, 0.0),
             degree: [0; 5],
         }
     }
@@ -581,16 +579,13 @@ fn spring_force(
 }
 
 fn calc_forces(
-    particles: &mut [Particle],
+    particles: &[Particle],
+    mut add_force: impl FnMut(usize, DVec2),
     springs: &Vec<EdgeSpring>,
     portals: &[Portal],
     edge_k: f64,
     damping: f64,
 ) {
-    for particle in particles.iter_mut() {
-        particle.force = DVec2::new(0.0, 0.0);
-    }
-
     for spring in springs {
         if spring.died {
             continue;
@@ -659,8 +654,8 @@ fn calc_forces(
                 ))
                 / 2.;
 
-            particles[spring.i].force += force1_avg;
-            particles[spring.j].force -= force2_avg;
+            add_force(spring.i, force1_avg);
+            add_force(spring.j, -force2_avg);
         } else {
             let force_vector = spring_force(
                 p1.position,
@@ -672,8 +667,8 @@ fn calc_forces(
                 damping,
             );
 
-            particles[spring.i].force += force_vector;
-            particles[spring.j].force -= force_vector;
+            add_force(spring.i, force_vector);
+            add_force(spring.j, -force_vector);
         };
     }
 }
@@ -683,8 +678,7 @@ fn calc_forces(
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-pub struct Mesh {
-    particles: Vec<Particle>,
+struct PhysicsSystem {
     springs: Vec<EdgeSpring>,
     portals: Vec<Portal>,
 
@@ -694,42 +688,12 @@ pub struct Mesh {
     damping_coefficient: f64,
     global_damping: f64,
 
-    // Scene constants
     size: usize,
-    scale: f64,
-    offset_x: f64,
-    offset_y: f64,
-    speed_x: f64,
-    speed_y: f64,
-    portal_type: u8,
-    draw_reflections: bool,
-    portal1_x: f64,
-    portal1_y: f64,
-    portal1_angle: f64,
-    portal2_x: f64,
-    portal2_y: f64,
-    portal2_angle: f64,
-    mirror_portals: bool,
-
-    particles_buffer: Vec<f32>,
-    lines_buffer: Vec<u32>,
-    circle1data: Vec<f32>,
-    circle2data: Vec<f32>,
-    circle1data_teleported: Vec<f32>,
-    circle2data_teleported: Vec<f32>,
-    disable_lines_buffer: Vec<u8>,
 }
 
-impl Default for Mesh {
+impl Default for PhysicsSystem {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Mesh {
-    pub fn new() -> Self {
-        Self {
-            particles: Vec::new(),
+        PhysicsSystem {
             springs: Vec::new(),
             portals: vec![Portal::new(DMat3::IDENTITY, DMat3::IDENTITY, 0)],
 
@@ -739,68 +703,42 @@ impl Mesh {
             global_damping: 0.01,
 
             size: 30,
-            scale: 1.,
-            offset_x: -1.5,
-            offset_y: 0.,
-            speed_x: 0.5,
-            speed_y: 0.,
-            portal_type: 0,
-            draw_reflections: true,
-            portal1_x: -1.5,
-            portal1_y: 0.,
-            portal1_angle: 0.,
-            portal2_x: 1.5,
-            portal2_y: 0.,
-            portal2_angle: 0.,
-            mirror_portals: true,
-
-            particles_buffer: Vec::new(),
-            lines_buffer: Vec::new(),
-            circle1data: Vec::new(),
-            circle2data: Vec::new(),
-            circle1data_teleported: Vec::new(),
-            circle2data_teleported: Vec::new(),
-            disable_lines_buffer: Vec::new(),
         }
     }
+}
 
-    pub fn init(&mut self) {
+impl PhysicsSystem {
+    fn init(
+        &mut self,
+        portals: Vec<Portal>,
+        size: usize,
+        scale: f64,
+        offset: DVec2,
+        speed: DVec2,
+    ) -> Vec<Particle> {
         // Clear existing data
-        self.particles.clear();
         self.springs.clear();
-        self.portals = vec![Portal::new(
-            DMat3::from_scale_angle_translation(
-                DVec2::new(1., 1.),
-                self.portal1_angle * PI,
-                DVec2::new(self.portal1_x, self.portal1_y),
-            ),
-            DMat3::from_scale_angle_translation(
-                if self.mirror_portals {
-                    DVec2::new(-1., 1.)
-                } else {
-                    DVec2::new(1., 1.)
-                },
-                self.portal2_angle * PI,
-                DVec2::new(self.portal2_x, self.portal2_y),
-            ),
-            self.portal_type,
-        )];
+        self.portals = portals;
+
+        let mut particles = vec![];
 
         for i in 0..self.size {
             for j in 0..self.size {
                 let x = i as f64 / (self.size - 1) as f64;
                 let y = j as f64 / (self.size - 1) as f64;
                 let mut p = Particle::new(
-                    x * self.scale - 0.5 * self.scale + self.offset_x,
-                    y * self.scale - 0.5 * self.scale + self.offset_y,
+                    x * scale - 0.5 * scale + offset.x,
+                    y * scale - 0.5 * scale + offset.y,
                 );
-                p.velocity = DVec2::new(self.speed_x, self.speed_y);
-                self.particles.push(p);
+                p.velocity = DVec2::new(speed.x, speed.y);
+                particles.push(p);
             }
         }
 
+        self.size = size;
+
         let get_index = |i, j| i * self.size + j;
-        let regular_len = 1. / (self.size - 1) as f64 * self.scale;
+        let regular_len = 1. / (self.size - 1) as f64 * scale;
         let diagonal_len = regular_len * 2.0_f64.sqrt();
         let diag2_len = regular_len * 5.0_f64.sqrt();
 
@@ -876,58 +814,111 @@ impl Mesh {
             }
         }
 
-        self.update_buffers();
+        particles
+    }
+}
+
+// =============== Generic RK4 ===============
+
+pub trait ODESystem<State, Deriv> {
+    fn eval(&self, t: f64, state: &State, deriv_out: &mut Deriv);
+}
+
+pub trait RKOps<State, Deriv> {
+    fn copy_state(&self, dst: &mut State, src: &State);
+    fn build_from(&self, out: &mut State, base: &State, scale: f64, deriv: &Deriv);
+    fn zero_deriv(&self, d: &mut Deriv);
+    fn axpy_deriv(&self, out: &mut Deriv, a: f64, k: &Deriv);
+    fn apply_final(&self, state: &mut State, combined: &Deriv, dt: f64);
+}
+
+#[derive(Clone, Debug)]
+pub struct RK4Workspace<State, Deriv> {
+    pub y0: State,
+    pub k1: Deriv,
+    pub k2: Deriv,
+    pub k3: Deriv,
+    pub k4: Deriv,
+    pub sum: Deriv,
+}
+
+pub fn rk4_step<State, Deriv, System, Ops>(
+    sys: &System,
+    ops: &Ops,
+    state: &mut State,
+    t: f64,
+    dt: f64,
+    ws: &mut RK4Workspace<State, Deriv>,
+) where
+    System: ODESystem<State, Deriv>,
+    Ops: RKOps<State, Deriv>,
+{
+    // snapshot
+    ops.copy_state(&mut ws.y0, state);
+
+    // k1
+    sys.eval(t, state, &mut ws.k1);
+
+    // k2
+    ops.build_from(state, &ws.y0, 0.5 * dt, &ws.k1);
+    sys.eval(t + 0.5 * dt, state, &mut ws.k2);
+
+    // k3
+    ops.build_from(state, &ws.y0, 0.5 * dt, &ws.k2);
+    sys.eval(t + 0.5 * dt, state, &mut ws.k3);
+
+    // k4
+    ops.build_from(state, &ws.y0, dt, &ws.k3);
+    sys.eval(t + dt, state, &mut ws.k4);
+
+    // combine
+    ops.zero_deriv(&mut ws.sum);
+    ops.axpy_deriv(&mut ws.sum, 1.0, &ws.k1);
+    ops.axpy_deriv(&mut ws.sum, 2.0, &ws.k2);
+    ops.axpy_deriv(&mut ws.sum, 2.0, &ws.k3);
+    ops.axpy_deriv(&mut ws.sum, 1.0, &ws.k4);
+
+    // restore and apply final (portals happen here)
+    ops.copy_state(state, &ws.y0);
+    ops.apply_final(state, &ws.sum, dt);
+}
+
+// =============== Concrete wiring for your mesh ===============
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Deriv2 {
+    pub dp: DVec2, // d(position)/dt = velocity
+    pub dv: DVec2, // d(velocity)/dt = acceleration (force / m) with m=1
+}
+
+impl Mesh {
+    fn ensure_workspace(&mut self) {
+        let n = self.particles.len();
+        self.rk_ws.ensure_len(n);
     }
 
-    pub fn step(&mut self) {
-        self.update_buffers();
-        self.integrate_rk4();
-    }
+    pub fn integrate_rk4_2(&mut self, t: f64) {
+        self.ensure_workspace();
 
-    fn integrate_rk4(&mut self) {
-        let original_states: Vec<Particle> = self.particles.to_vec();
+        let ops = ParticleOps {
+            portals: &self.system.portals,
+        };
 
-        let mut k1 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
-        let mut k2 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
-        let mut k3 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
-        let mut k4 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
+        rk4_step(
+            &self.system,
+            &ops,
+            &mut self.particles,
+            t,
+            self.system.dt,
+            &mut self.rk_ws,
+        );
 
-        // STEP 1: First evaluation (k1) at the current state
-        self.evaluate_derivatives(&mut k1);
-
-        // STEP 2: Second evaluation (k2) at t + dt/2 using k1
-        self.apply_derivatives_half_step(&k1, &original_states);
-        self.evaluate_derivatives(&mut k2);
-
-        // STEP 3: Third evaluation (k3) at t + dt/2 using k2
-        self.restore_original_state(&original_states);
-        self.apply_derivatives_half_step(&k2, &original_states);
-        self.evaluate_derivatives(&mut k3);
-
-        // STEP 4: Fourth evaluation (k4) at t + dt using k3
-        self.restore_original_state(&original_states);
-        self.apply_derivatives_full_step(&k3, &original_states);
-        self.evaluate_derivatives(&mut k4);
-
-        self.restore_original_state(&original_states);
-
-        // STEP 5: Combine the derivatives with RK4 weights
-        for i in 0..self.particles.len() {
-            let p = &mut self.particles[i];
-
-            let position_change = k1[i].0 * 1.0 + k2[i].0 * 2.0 + k3[i].0 * 2.0 + k4[i].0 * 1.0;
-            let velocity_change = k1[i].1 * 1.0 + k2[i].1 * 2.0 + k3[i].1 * 2.0 + k4[i].1 * 1.0;
-
-            p.velocity += velocity_change * (self.dt / 6.0);
-            move_particle(&self.portals, p, position_change * (self.dt / 6.0));
-        }
-
-        let spring_die_factor = 4.;
-        for spring in &mut self.springs {
+        // Post-step: spring death rule
+        let spring_die_factor = 4.0;
+        for spring in &mut self.system.springs {
             if !spring.died {
                 let p1 = &self.particles[spring.i];
                 let p2 = &self.particles[spring.j];
-
                 if p1.degree == p2.degree
                     && (p1.position - p2.position).length() > spring.rest_length * spring_die_factor
                 {
@@ -936,72 +927,252 @@ impl Mesh {
             }
         }
     }
+}
 
-    fn evaluate_derivatives(&mut self, derivatives: &mut [(DVec2, DVec2)]) {
+// ODESystem: how to compute derivatives for the mesh
+impl ODESystem<Vec<Particle>, Vec<Deriv2>> for PhysicsSystem {
+    fn eval(&self, _t: f64, state: &Vec<Particle>, deriv_out: &mut Vec<Deriv2>) {
+        // forces buffer
+        for f in &mut *deriv_out {
+            f.dv = DVec2::ZERO;
+        }
+
+        let edge_k = self.edge_spring_constant * (self.size as f64) * (self.size as f64) / 100.0;
+
         calc_forces(
-            &mut self.particles,
+            state,
+            |pos, force| deriv_out[pos].dv += force,
             &self.springs,
             &self.portals,
-            self.edge_spring_constant * (self.size as f64) * (self.size as f64) / 100.,
+            edge_k,
             self.damping_coefficient,
         );
 
-        for (i, p) in self.particles.iter().enumerate() {
-            let mut damped_force = p.force - (p.velocity * self.global_damping);
+        // turn forces into derivatives
+        if deriv_out.len() != state.len() {
+            deriv_out.resize(state.len(), Deriv2::default());
+        }
 
+        for (i, p) in state.iter().enumerate() {
+            let mut damped_force = deriv_out[i].dv - (p.velocity * self.global_damping);
+
+            // clamp
             if damped_force.length() > 1e6 {
                 damped_force = damped_force.normalize() * 1e6;
             }
 
-            derivatives[i] = (p.velocity, damped_force);
+            deriv_out[i] = Deriv2 {
+                dp: p.velocity,
+                dv: damped_force, // m = 1
+            };
+        }
+    }
+}
+
+// RKOps for Vec<Particle> / Vec<Deriv2>
+pub struct ParticleOps<'a> {
+    pub portals: &'a [Portal],
+}
+
+impl<'a> RKOps<Vec<Particle>, Vec<Deriv2>> for ParticleOps<'a> {
+    fn copy_state(&self, dst: &mut Vec<Particle>, src: &Vec<Particle>) {
+        if dst.len() != src.len() {
+            dst.resize(src.len(), Particle::default());
+        }
+        // element-wise copy (no alloc)
+        for (d, s) in dst.iter_mut().zip(src.iter()) {
+            *d = s.clone();
         }
     }
 
-    fn apply_derivatives_half_step(
-        &mut self,
-        derivatives: &[(DVec2, DVec2)],
-        original_states: &[Particle],
+    fn build_from(
+        &self,
+        out: &mut Vec<Particle>,
+        base: &Vec<Particle>,
+        scale: f64,
+        deriv: &Vec<Deriv2>,
     ) {
-        let half_dt = self.dt * 0.5;
-
-        for i in 0..self.particles.len() {
-            let p = &mut self.particles[i];
-            let original = &original_states[i];
-
-            p.velocity = original.velocity + derivatives[i].1 * half_dt;
-            move_particle(&self.portals, p, derivatives[i].0 * half_dt);
-            // p.position += derivatives[i].0 * half_dt;
+        debug_assert_eq!(out.len(), base.len());
+        debug_assert_eq!(base.len(), deriv.len());
+        for ((o, b), k) in out.iter_mut().zip(base.iter()).zip(deriv.iter()) {
+            *o = b.clone(); // copy non-integrated fields (e.g., degree)
+            o.velocity = b.velocity + k.dv * scale;
+            o.position = b.position + k.dp * scale;
         }
     }
 
-    fn apply_derivatives_full_step(
-        &mut self,
-        derivatives: &[(DVec2, DVec2)],
-        original_states: &[Particle],
-    ) {
-        for i in 0..self.particles.len() {
-            let p = &mut self.particles[i];
-            let original = &original_states[i];
-
-            p.velocity = original.velocity + derivatives[i].1 * self.dt;
-            move_particle(&self.portals, p, derivatives[i].0 * self.dt);
-            // p.position += derivatives[i].0 * self.dt;
+    fn zero_deriv(&self, d: &mut Vec<Deriv2>) {
+        for di in d.iter_mut() {
+            *di = Deriv2::default();
         }
     }
 
-    fn restore_original_state(&mut self, original_states: &[Particle]) {
-        #[allow(clippy::manual_memcpy)]
-        for i in 0..self.particles.len() {
-            self.particles[i] = original_states[i].clone();
+    fn axpy_deriv(&self, out: &mut Vec<Deriv2>, a: f64, k: &Vec<Deriv2>) {
+        if out.len() != k.len() {
+            out.resize(k.len(), Deriv2::default());
         }
+        for (o, ki) in out.iter_mut().zip(k.iter()) {
+            o.dp += ki.dp * a;
+            o.dv += ki.dv * a;
+        }
+    }
+
+    fn apply_final(&self, state: &mut Vec<Particle>, combined: &Vec<Deriv2>, dt: f64) {
+        debug_assert_eq!(state.len(), combined.len());
+        let s = dt / 6.0;
+        for (p, k) in state.iter_mut().zip(combined.iter()) {
+            p.velocity += k.dv * s;
+            let offset = k.dp * s;
+            move_particle(self.portals, p, offset); // portals only here
+        }
+    }
+}
+
+// Convenience: workspace alloc/resize specialized for particles
+impl RK4Workspace<Vec<Particle>, Vec<Deriv2>> {
+    pub fn new_particles(n: usize) -> Self {
+        Self {
+            y0: vec![Particle::default(); n],
+            k1: vec![Deriv2::default(); n],
+            k2: vec![Deriv2::default(); n],
+            k3: vec![Deriv2::default(); n],
+            k4: vec![Deriv2::default(); n],
+            sum: vec![Deriv2::default(); n],
+        }
+    }
+
+    pub fn ensure_len(&mut self, n: usize) {
+        if self.y0.len() != n {
+            self.y0.resize(n, Particle::default());
+        }
+        if self.k1.len() != n {
+            self.k1.resize(n, Deriv2::default());
+            self.k2.resize(n, Deriv2::default());
+            self.k3.resize(n, Deriv2::default());
+            self.k4.resize(n, Deriv2::default());
+            self.sum.resize(n, Deriv2::default());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct Mesh {
+    particles: Vec<Particle>,
+    system: PhysicsSystem,
+
+    // preallocated working memory
+    rk_ws: RK4Workspace<Vec<Particle>, Vec<Deriv2>>,
+
+    // Scene constants
+    size: usize,
+    scale: f64,
+    offset_x: f64,
+    offset_y: f64,
+    speed_x: f64,
+    speed_y: f64,
+    portal_type: u8,
+    draw_reflections: bool,
+    portal1_x: f64,
+    portal1_y: f64,
+    portal1_angle: f64,
+    portal2_x: f64,
+    portal2_y: f64,
+    portal2_angle: f64,
+    mirror_portals: bool,
+
+    particles_buffer: Vec<f32>,
+    lines_buffer: Vec<u32>,
+    circle1data: Vec<f32>,
+    circle2data: Vec<f32>,
+    circle1data_teleported: Vec<f32>,
+    circle2data_teleported: Vec<f32>,
+    disable_lines_buffer: Vec<u8>,
+}
+
+impl Default for Mesh {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Mesh {
+    pub fn new() -> Self {
+        Self {
+            particles: Vec::new(),
+            system: Default::default(),
+
+            rk_ws: RK4Workspace::<Vec<Particle>, Vec<Deriv2>>::new_particles(30 * 30),
+
+            size: 30,
+            scale: 1.,
+            offset_x: -1.5,
+            offset_y: 0.,
+            speed_x: 0.5,
+            speed_y: 0.,
+            portal_type: 0,
+            draw_reflections: true,
+            portal1_x: -1.5,
+            portal1_y: 0.,
+            portal1_angle: 0.,
+            portal2_x: 1.5,
+            portal2_y: 0.,
+            portal2_angle: 0.,
+            mirror_portals: true,
+
+            particles_buffer: Vec::new(),
+            lines_buffer: Vec::new(),
+            circle1data: Vec::new(),
+            circle2data: Vec::new(),
+            circle1data_teleported: Vec::new(),
+            circle2data_teleported: Vec::new(),
+            disable_lines_buffer: Vec::new(),
+        }
+    }
+
+    pub fn init(&mut self) {
+        self.particles = self.system.init(
+            vec![Portal::new(
+                DMat3::from_scale_angle_translation(
+                    DVec2::new(1., 1.),
+                    self.portal1_angle * PI,
+                    DVec2::new(self.portal1_x, self.portal1_y),
+                ),
+                DMat3::from_scale_angle_translation(
+                    if self.mirror_portals {
+                        DVec2::new(-1., 1.)
+                    } else {
+                        DVec2::new(1., 1.)
+                    },
+                    self.portal2_angle * PI,
+                    DVec2::new(self.portal2_x, self.portal2_y),
+                ),
+                self.portal_type,
+            )],
+            self.size,
+            self.scale,
+            DVec2::new(self.offset_x, self.offset_y),
+            DVec2::new(self.speed_x, self.speed_y),
+        );
+        self.rk_ws =
+            RK4Workspace::<Vec<Particle>, Vec<Deriv2>>::new_particles(self.particles.len());
+        self.update_buffers();
+    }
+
+    pub fn step(&mut self) {
+        self.update_buffers();
+        self.integrate_rk4_2(0.);
     }
 
     pub fn get_constant(&self, name: &str) -> f32 {
         match name {
-            "dt" => self.dt as f32,
-            "edgeSpringConstant" => self.edge_spring_constant as f32,
-            "dampingCoefficient" => self.damping_coefficient as f32,
-            "globalDamping" => self.global_damping as f32,
+            "dt" => self.system.dt as f32,
+            "edgeSpringConstant" => self.system.edge_spring_constant as f32,
+            "dampingCoefficient" => self.system.damping_coefficient as f32,
+            "globalDamping" => self.system.global_damping as f32,
             "draw_reflections" => self.draw_reflections as u32 as f32,
 
             "scene_size" => self.size as f32,
@@ -1026,10 +1197,10 @@ impl Mesh {
 
     pub fn set_constant(&mut self, name: &str, value: f32) {
         match name {
-            "dt" => self.dt = value as f64,
-            "edgeSpringConstant" => self.edge_spring_constant = value as f64,
-            "dampingCoefficient" => self.damping_coefficient = value as f64,
-            "globalDamping" => self.global_damping = value as f64,
+            "dt" => self.system.dt = value as f64,
+            "edgeSpringConstant" => self.system.edge_spring_constant = value as f64,
+            "dampingCoefficient" => self.system.damping_coefficient = value as f64,
+            "globalDamping" => self.system.global_damping = value as f64,
             "draw_reflections" => {
                 self.draw_reflections = value > 0.5;
                 self.update_buffers();
@@ -1106,26 +1277,26 @@ impl Mesh {
 
         if self.draw_reflections {
             for p in &self.particles {
-                let new_pos = teleport_position_full(&self.portals[0], p.position, -1);
+                let new_pos = teleport_position_full(&self.system.portals[0], p.position, -1);
                 self.particles_buffer.push(new_pos.x as f32);
                 self.particles_buffer.push(new_pos.y as f32);
             }
 
             for p in &self.particles {
-                let new_pos = teleport_position_full(&self.portals[0], p.position, 1);
+                let new_pos = teleport_position_full(&self.system.portals[0], p.position, 1);
                 self.particles_buffer.push(new_pos.x as f32);
                 self.particles_buffer.push(new_pos.y as f32);
             }
         }
 
         self.lines_buffer.clear();
-        for spring in &self.springs {
+        for spring in &self.system.springs {
             self.lines_buffer.push(spring.i as u32);
             self.lines_buffer.push(spring.j as u32);
         }
 
         if self.draw_reflections {
-            for spring in &self.springs {
+            for spring in &self.system.springs {
                 if self.particles[spring.i].degree[0] + 1 == self.particles[spring.j].degree[0] {
                     self.lines_buffer.push(spring.i as u32);
                     self.lines_buffer
@@ -1144,7 +1315,7 @@ impl Mesh {
                 }
             }
 
-            for spring in &self.springs {
+            for spring in &self.system.springs {
                 if self.particles[spring.i].degree[0] + 1 == self.particles[spring.j].degree[0] {
                     self.lines_buffer
                         .push(self.particles.len() as u32 * 2 + spring.i as u32);
@@ -1165,7 +1336,7 @@ impl Mesh {
         }
 
         self.disable_lines_buffer.clear();
-        for spring in &self.springs {
+        for spring in &self.system.springs {
             self.disable_lines_buffer.push(
                 (self.particles[spring.i].degree != self.particles[spring.j].degree
                     || spring.died
@@ -1174,7 +1345,7 @@ impl Mesh {
         }
 
         if self.draw_reflections {
-            for spring in &self.springs {
+            for spring in &self.system.springs {
                 self.disable_lines_buffer.push(
                     (if self.particles[spring.i].degree[0] != self.particles[spring.j].degree[0] {
                         (self.particles[spring.i].degree[0] - self.particles[spring.j].degree[0])
@@ -1188,7 +1359,7 @@ impl Mesh {
                 );
             }
 
-            for spring in &self.springs {
+            for spring in &self.system.springs {
                 self.disable_lines_buffer.push(
                     (if self.particles[spring.i].degree[0] != self.particles[spring.j].degree[0] {
                         (self.particles[spring.i].degree[0] - self.particles[spring.j].degree[0])
@@ -1205,28 +1376,30 @@ impl Mesh {
 
         self.circle1data.clear();
         self.circle1data
-            .push(self.portals[0].get_center1().x as f32);
+            .push(self.system.portals[0].get_center1().x as f32);
         self.circle1data
-            .push(self.portals[0].get_center1().y as f32);
-        self.circle1data.push(self.portals[0].get_radius1() as f32);
+            .push(self.system.portals[0].get_center1().y as f32);
+        self.circle1data
+            .push(self.system.portals[0].get_radius1() as f32);
 
         self.circle2data.clear();
         self.circle2data
-            .push(self.portals[0].get_center2().x as f32);
+            .push(self.system.portals[0].get_center2().x as f32);
         self.circle2data
-            .push(self.portals[0].get_center2().y as f32);
-        self.circle2data.push(self.portals[0].get_radius2() as f32);
+            .push(self.system.portals[0].get_center2().y as f32);
+        self.circle2data
+            .push(self.system.portals[0].get_radius2() as f32);
 
         self.circle1data_teleported.clear();
-        let center1 = self.portals[0].get_center1();
+        let center1 = self.system.portals[0].get_center1();
         let radius1_teleported = teleport_position_full(
-            &self.portals[0],
-            center1 + center1.normalize() * self.portals[0].get_radius1(),
+            &self.system.portals[0],
+            center1 + center1.normalize() * self.system.portals[0].get_radius1(),
             -1,
         );
         let radius1_teleported2 = teleport_position_full(
-            &self.portals[0],
-            center1 - center1.normalize() * self.portals[0].get_radius1(),
+            &self.system.portals[0],
+            center1 - center1.normalize() * self.system.portals[0].get_radius1(),
             -1,
         );
         let center1_teleported = (radius1_teleported + radius1_teleported2) / 2.;
@@ -1238,15 +1411,15 @@ impl Mesh {
             .push((radius1_teleported - radius1_teleported2).length() as f32 / 2.);
 
         self.circle2data_teleported.clear();
-        let center2 = self.portals[0].get_center2();
+        let center2 = self.system.portals[0].get_center2();
         let radius2_teleported = teleport_position_full(
-            &self.portals[0],
-            center2 + center2.normalize() * self.portals[0].get_radius2(),
+            &self.system.portals[0],
+            center2 + center2.normalize() * self.system.portals[0].get_radius2(),
             1,
         );
         let radius2_teleported2 = teleport_position_full(
-            &self.portals[0],
-            center2 - center2.normalize() * self.portals[0].get_radius2(),
+            &self.system.portals[0],
+            center2 - center2.normalize() * self.system.portals[0].get_radius2(),
             1,
         );
         let center2_teleported = (radius2_teleported + radius2_teleported2) / 2.;
@@ -1280,9 +1453,9 @@ impl Mesh {
 
     pub fn get_lines_count(&mut self) -> u32 {
         if self.draw_reflections {
-            self.springs.len() as u32 * 3
+            self.system.springs.len() as u32 * 3
         } else {
-            self.springs.len() as u32
+            self.system.springs.len() as u32
         }
     }
 
@@ -1403,7 +1576,7 @@ mod tests2 {
 
         mesh.size = 120;
         mesh.offset_x = -1.5;
-        mesh.edge_spring_constant = 200.;
+        mesh.system.edge_spring_constant = 200.;
 
         // mesh.size = 120;
         // mesh.scale = 3.27;
