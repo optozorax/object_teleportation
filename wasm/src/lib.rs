@@ -1,12 +1,8 @@
 use glam::Vec3Swizzles;
+use glam::{DMat3, DVec2, DVec3};
 use wasm_bindgen::prelude::*;
 
-#[allow(non_camel_case_types)]
-pub type fxx = f64;
 const PI: f64 = std::f64::consts::PI;
-pub type Vector2 = glam::DVec2;
-pub type Vector3 = glam::DVec3;
-pub type Matrix3 = glam::DMat3;
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -14,18 +10,18 @@ pub type Matrix3 = glam::DMat3;
 
 #[derive(Clone, Debug)]
 pub struct Particle {
-    pub position: Vector2,
-    pub velocity: Vector2,
-    pub force: Vector2,
+    pub position: DVec2,
+    pub velocity: DVec2,
+    pub force: DVec2,
     pub degree: i8,
 }
 
 impl Particle {
-    pub fn new(x: fxx, y: fxx) -> Self {
+    pub fn new(x: f64, y: f64) -> Self {
         Self {
-            position: Vector2::new(x, y),
-            velocity: Vector2::new(0.0, 0.0),
-            force: Vector2::new(0.0, 0.0),
+            position: DVec2::new(x, y),
+            velocity: DVec2::new(0.0, 0.0),
+            force: DVec2::new(0.0, 0.0),
             degree: 0,
         }
     }
@@ -35,13 +31,13 @@ impl Particle {
 pub struct EdgeSpring {
     pub i: usize,
     pub j: usize,
-    pub rest_length: fxx,
+    pub rest_length: f64,
     pub died: bool,
     pub show: bool,
 }
 
 impl EdgeSpring {
-    pub fn new(i: usize, j: usize, rest_length: fxx, show: bool) -> Self {
+    pub fn new(i: usize, j: usize, rest_length: f64, show: bool) -> Self {
         Self {
             i,
             j,
@@ -58,21 +54,21 @@ impl EdgeSpring {
 
 #[derive(Clone, Debug)]
 struct Portals {
-    a: Matrix3,
-    b: Matrix3,
+    a: DMat3,
+    b: DMat3,
 
     portal_type: u8,
 
-    a_inv: Matrix3,
-    b_inv: Matrix3,
+    a_inv: DMat3,
+    b_inv: DMat3,
 }
 
-fn is_intersects_unit_circle(a: Vector2, b: Vector2) -> bool {
+fn is_intersects_unit_circle(a: DVec2, b: DVec2) -> bool {
     let a_dist_sq = a.length_squared();
     let b_dist_sq = b.length_squared();
 
     // Check if either endpoint is exactly on the circle
-    if (a_dist_sq - 1.0).abs() < fxx::EPSILON || (b_dist_sq - 1.0).abs() < fxx::EPSILON {
+    if (a_dist_sq - 1.0).abs() < f64::EPSILON || (b_dist_sq - 1.0).abs() < f64::EPSILON {
         return true;
     }
 
@@ -92,7 +88,7 @@ fn is_intersects_unit_circle(a: Vector2, b: Vector2) -> bool {
     let ab_len_sq = ab.length_squared();
 
     // Handle degenerate case (same point)
-    if ab_len_sq < fxx::EPSILON {
+    if ab_len_sq < f64::EPSILON {
         return false;
     }
 
@@ -116,7 +112,7 @@ fn is_intersects_unit_circle(a: Vector2, b: Vector2) -> bool {
     let t2 = (-b_coeff + sqrt_discriminant) / (2.0 * a_coeff);
 
     // Check if either intersection point lies on the segment [0, 1]
-    (t1 >= 0.0 && t1 <= 1.0) || (t2 >= 0.0 && t2 <= 1.0)
+    (0.0..=1.0).contains(&t1) || (0.0..=1.0).contains(&t2)
 }
 
 #[cfg(test)]
@@ -127,12 +123,12 @@ mod tests {
     fn test_one_endpoint_inside_one_outside() {
         // One point inside, one outside - must cross border
         assert!(is_intersects_unit_circle(
-            Vector2::new(0.5, 0.0),
-            Vector2::new(2.0, 0.0)
+            DVec2::new(0.5, 0.0),
+            DVec2::new(2.0, 0.0)
         ));
         assert!(is_intersects_unit_circle(
-            Vector2::new(2.0, 0.0),
-            Vector2::new(0.5, 0.0)
+            DVec2::new(2.0, 0.0),
+            DVec2::new(0.5, 0.0)
         ));
     }
 
@@ -140,12 +136,12 @@ mod tests {
     fn test_both_endpoints_inside_circle() {
         // Both points inside circle - no border intersection
         assert!(!is_intersects_unit_circle(
-            Vector2::new(0.5, 0.0),
-            Vector2::new(0.0, 0.5)
+            DVec2::new(0.5, 0.0),
+            DVec2::new(0.0, 0.5)
         ));
         assert!(!is_intersects_unit_circle(
-            Vector2::new(-0.3, 0.3),
-            Vector2::new(0.2, -0.4)
+            DVec2::new(-0.3, 0.3),
+            DVec2::new(0.2, -0.4)
         ));
     }
 
@@ -153,12 +149,12 @@ mod tests {
     fn test_endpoint_on_circle() {
         // Point on circle boundary
         assert!(is_intersects_unit_circle(
-            Vector2::new(1.0, 0.0),
-            Vector2::new(2.0, 0.0)
+            DVec2::new(1.0, 0.0),
+            DVec2::new(2.0, 0.0)
         ));
         assert!(is_intersects_unit_circle(
-            Vector2::new(0.0, 1.0),
-            Vector2::new(0.0, 2.0)
+            DVec2::new(0.0, 1.0),
+            DVec2::new(0.0, 2.0)
         ));
     }
 
@@ -166,12 +162,12 @@ mod tests {
     fn test_segment_tangent_to_circle() {
         // Segment tangent to circle (touches border at exactly one point)
         assert!(is_intersects_unit_circle(
-            Vector2::new(-1.0, 1.0),
-            Vector2::new(1.0, 1.0)
+            DVec2::new(-1.0, 1.0),
+            DVec2::new(1.0, 1.0)
         ));
         assert!(is_intersects_unit_circle(
-            Vector2::new(1.0, -1.0),
-            Vector2::new(1.0, 1.0)
+            DVec2::new(1.0, -1.0),
+            DVec2::new(1.0, 1.0)
         ));
     }
 
@@ -179,12 +175,12 @@ mod tests {
     fn test_segment_crosses_circle_completely() {
         // Segment passes through circle (enters and exits)
         assert!(is_intersects_unit_circle(
-            Vector2::new(-2.0, 0.0),
-            Vector2::new(2.0, 0.0)
+            DVec2::new(-2.0, 0.0),
+            DVec2::new(2.0, 0.0)
         ));
         assert!(is_intersects_unit_circle(
-            Vector2::new(0.0, -2.0),
-            Vector2::new(0.0, 2.0)
+            DVec2::new(0.0, -2.0),
+            DVec2::new(0.0, 2.0)
         ));
     }
 
@@ -192,17 +188,17 @@ mod tests {
     fn test_segment_misses_circle() {
         // Segment completely outside circle, doesn't touch border
         assert!(!is_intersects_unit_circle(
-            Vector2::new(2.0, 2.0),
-            Vector2::new(3.0, 2.0)
+            DVec2::new(2.0, 2.0),
+            DVec2::new(3.0, 2.0)
         ));
         assert!(!is_intersects_unit_circle(
-            Vector2::new(1.5, 0.0),
-            Vector2::new(2.0, 0.0)
+            DVec2::new(1.5, 0.0),
+            DVec2::new(2.0, 0.0)
         ));
     }
 }
 
-fn reflect_around_unit_circle(pos: Vector2) -> Vector2 {
+fn reflect_around_unit_circle(pos: DVec2) -> DVec2 {
     let normal = pos.normalize();
     let len = pos.length();
     if len == 0. {
@@ -211,7 +207,7 @@ fn reflect_around_unit_circle(pos: Vector2) -> Vector2 {
     normal * 1. / len
 }
 
-fn reflect_direction_around_unit_circle(pos: Vector2, dir: Vector2) -> Vector2 {
+fn reflect_direction_around_unit_circle(pos: DVec2, dir: DVec2) -> DVec2 {
     let r2 = pos.length_squared();
     if r2 == 0. {
         return dir;
@@ -225,7 +221,7 @@ fn reflect_direction_around_unit_circle(pos: Vector2, dir: Vector2) -> Vector2 {
 }
 
 impl Portals {
-    fn new(a: Matrix3, b: Matrix3) -> Portals {
+    fn new(a: DMat3, b: DMat3) -> Portals {
         Self {
             a,
             b,
@@ -235,24 +231,24 @@ impl Portals {
         }
     }
 
-    fn get_center1(&self) -> Vector2 {
-        (self.a * Vector3::new(0., 0., 1.)).xy()
+    fn get_center1(&self) -> DVec2 {
+        (self.a * DVec3::new(0., 0., 1.)).xy()
     }
 
-    fn get_center2(&self) -> Vector2 {
-        (self.b * Vector3::new(0., 0., 1.)).xy()
+    fn get_center2(&self) -> DVec2 {
+        (self.b * DVec3::new(0., 0., 1.)).xy()
     }
 
-    fn get_radius1(&self) -> fxx {
-        (self.a * Vector3::new(1., 0., 0.)).length()
+    fn get_radius1(&self) -> f64 {
+        (self.a * DVec3::new(1., 0., 0.)).length()
     }
 
-    fn get_radius2(&self) -> fxx {
-        (self.b * Vector3::new(1., 0., 0.)).length()
+    fn get_radius2(&self) -> f64 {
+        (self.b * DVec3::new(1., 0., 0.)).length()
     }
 
-    fn teleport_position(&self, pos: Vector2, mut degree: i8) -> Vector2 {
-        let mut pos = Vector3::from((pos, 1.));
+    fn teleport_position(&self, pos: DVec2, mut degree: i8) -> DVec2 {
+        let mut pos = DVec3::from((pos, 1.));
         loop {
             if degree == 0 {
                 break;
@@ -261,7 +257,7 @@ impl Portals {
                 pos = self.a_inv * pos;
 
                 if self.portal_type == 0 || self.portal_type == 1 {
-                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
                 } else if self.portal_type == 2 {
                     // nothing
                 }
@@ -272,7 +268,7 @@ impl Portals {
                 pos = self.b_inv * pos;
 
                 if self.portal_type == 0 || self.portal_type == 1 {
-                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
                 } else if self.portal_type == 2 {
                     // nothing
                 }
@@ -283,9 +279,9 @@ impl Portals {
         pos.xy()
     }
 
-    fn teleport_direction(&self, pos: Vector2, dir: Vector2, mut degree: i8) -> Vector2 {
-        let mut pos = Vector3::from((pos, 1.));
-        let mut dir = Vector3::from((dir, 0.));
+    fn teleport_direction(&self, pos: DVec2, dir: DVec2, mut degree: i8) -> DVec2 {
+        let mut pos = DVec3::from((pos, 1.));
+        let mut dir = DVec3::from((dir, 0.));
         loop {
             if degree == 0 {
                 break;
@@ -296,11 +292,9 @@ impl Portals {
                 dir = self.a_inv * dir;
 
                 if self.portal_type == 0 {
-                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir = Vector3::from((
-                        reflect_direction_around_unit_circle(pos.xy(), dir.xy()),
-                        0.,
-                    ));
+                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    dir =
+                        DVec3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
                 } else if self.portal_type == 1 {
                     dir = -dir;
                 } else if self.portal_type == 2 {
@@ -316,11 +310,9 @@ impl Portals {
                 dir = self.b_inv * dir;
 
                 if self.portal_type == 0 {
-                    pos = Vector3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir = Vector3::from((
-                        reflect_direction_around_unit_circle(pos.xy(), dir.xy()),
-                        0.,
-                    ));
+                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    dir =
+                        DVec3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
                 } else if self.portal_type == 1 {
                     dir = -dir;
                 } else if self.portal_type == 2 {
@@ -334,9 +326,9 @@ impl Portals {
         dir.xy()
     }
 
-    fn is_intersect(&self, prev_pos: Vector2, new_pos: Vector2) -> Option<i8> {
-        let prev_pos: Vector3 = (prev_pos, 1.0).into();
-        let new_pos: Vector3 = (new_pos, 1.0).into();
+    fn is_intersect(&self, prev_pos: DVec2, new_pos: DVec2) -> Option<i8> {
+        let prev_pos: DVec3 = (prev_pos, 1.0).into();
+        let new_pos: DVec3 = (new_pos, 1.0).into();
         if is_intersects_unit_circle((self.a_inv * prev_pos).xy(), (self.a_inv * new_pos).xy()) {
             Some(1)
         } else if is_intersects_unit_circle(
@@ -349,7 +341,7 @@ impl Portals {
         }
     }
 
-    fn move_particle(&self, particle: &mut Particle, offset: Vector2) {
+    fn move_particle(&self, particle: &mut Particle, offset: DVec2) {
         if let Some(dir) = self.is_intersect(particle.position, particle.position + offset) {
             particle.velocity =
                 self.teleport_direction(particle.position + offset, particle.velocity, dir);
@@ -366,14 +358,14 @@ impl Portals {
 // ---------------------------------------------------------------------------
 
 fn spring_force(
-    pos1: Vector2,
-    pos2: Vector2,
-    speed1: Vector2,
-    speed2: Vector2,
-    rest_length: fxx,
-    edge_k: fxx,
-    damping: fxx,
-) -> Vector2 {
+    pos1: DVec2,
+    pos2: DVec2,
+    speed1: DVec2,
+    speed2: DVec2,
+    rest_length: f64,
+    edge_k: f64,
+    damping: f64,
+) -> DVec2 {
     let delta = pos2 - pos1;
     let mut current_length = delta.length();
 
@@ -393,20 +385,18 @@ fn spring_force(
     let damping_force = damping * relative_velocity;
     let total_force = spring_force + damping_force;
 
-    let force_vector = direction * total_force;
-
-    force_vector
+    direction * total_force
 }
 
 fn calc_forces(
-    particles: &mut Vec<Particle>,
+    particles: &mut [Particle],
     springs: &Vec<EdgeSpring>,
     portals: &Portals,
-    edge_k: fxx,
-    damping: fxx,
+    edge_k: f64,
+    damping: f64,
 ) {
     for particle in particles.iter_mut() {
-        particle.force = Vector2::new(0.0, 0.0);
+        particle.force = DVec2::new(0.0, 0.0);
     }
 
     for spring in springs {
@@ -477,26 +467,26 @@ pub struct Mesh {
     portals: Portals,
 
     // Simulation constants
-    dt: fxx,
-    edge_spring_constant: fxx,
-    damping_coefficient: fxx,
-    global_damping: fxx,
+    dt: f64,
+    edge_spring_constant: f64,
+    damping_coefficient: f64,
+    global_damping: f64,
 
     // Scene constants
     size: usize,
-    scale: fxx,
-    offset_x: fxx,
-    offset_y: fxx,
-    speed_x: fxx,
-    speed_y: fxx,
+    scale: f64,
+    offset_x: f64,
+    offset_y: f64,
+    speed_x: f64,
+    speed_y: f64,
     portal_type: u8,
     draw_reflections: bool,
-    portal1_x: fxx,
-    portal1_y: fxx,
-    portal1_angle: fxx,
-    portal2_x: fxx,
-    portal2_y: fxx,
-    portal2_angle: fxx,
+    portal1_x: f64,
+    portal1_y: f64,
+    portal1_angle: f64,
+    portal2_x: f64,
+    portal2_y: f64,
+    portal2_angle: f64,
     mirror_portals: bool,
 
     particles_buffer: Vec<f32>,
@@ -508,12 +498,18 @@ pub struct Mesh {
     disable_lines_buffer: Vec<u8>,
 }
 
+impl Default for Mesh {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mesh {
     pub fn new() -> Self {
         Self {
             particles: Vec::new(),
             springs: Vec::new(),
-            portals: Portals::new(Matrix3::IDENTITY, Matrix3::IDENTITY),
+            portals: Portals::new(DMat3::IDENTITY, DMat3::IDENTITY),
 
             dt: 0.01,
             edge_spring_constant: 50.0,
@@ -551,40 +547,40 @@ impl Mesh {
         self.particles.clear();
         self.springs.clear();
         self.portals = Portals::new(
-            Matrix3::from_scale_angle_translation(
-                Vector2::new(1., 1.),
+            DMat3::from_scale_angle_translation(
+                DVec2::new(1., 1.),
                 self.portal1_angle * PI,
-                Vector2::new(self.portal1_x, self.portal1_y),
+                DVec2::new(self.portal1_x, self.portal1_y),
             ),
-            Matrix3::from_scale_angle_translation(
+            DMat3::from_scale_angle_translation(
                 if self.mirror_portals {
-                    Vector2::new(-1., 1.)
+                    DVec2::new(-1., 1.)
                 } else {
-                    Vector2::new(1., 1.)
+                    DVec2::new(1., 1.)
                 },
                 self.portal2_angle * PI,
-                Vector2::new(self.portal2_x, self.portal2_y),
+                DVec2::new(self.portal2_x, self.portal2_y),
             ),
         );
         self.portals.portal_type = self.portal_type;
 
         for i in 0..self.size {
             for j in 0..self.size {
-                let x = i as fxx / (self.size - 1) as fxx;
-                let y = j as fxx / (self.size - 1) as fxx;
+                let x = i as f64 / (self.size - 1) as f64;
+                let y = j as f64 / (self.size - 1) as f64;
                 let mut p = Particle::new(
                     x * self.scale - 0.5 * self.scale + self.offset_x,
                     y * self.scale - 0.5 * self.scale + self.offset_y,
                 );
-                p.velocity = Vector2::new(self.speed_x, self.speed_y);
+                p.velocity = DVec2::new(self.speed_x, self.speed_y);
                 self.particles.push(p);
             }
         }
 
         let get_index = |i, j| i * self.size + j;
-        let regular_len = 1. / (self.size - 1) as fxx * self.scale;
-        let diagonal_len = regular_len * (2.0 as fxx).sqrt();
-        let diag2_len = regular_len * (5.0 as fxx).sqrt();
+        let regular_len = 1. / (self.size - 1) as f64 * self.scale;
+        let diagonal_len = regular_len * 2.0_f64.sqrt();
+        let diag2_len = regular_len * 5.0_f64.sqrt();
 
         for i in 0..self.size {
             for j in 0..self.size {
@@ -667,12 +663,12 @@ impl Mesh {
     }
 
     fn integrate_rk4(&mut self) {
-        let original_states: Vec<Particle> = self.particles.iter().cloned().collect();
+        let original_states: Vec<Particle> = self.particles.to_vec();
 
-        let mut k1 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
-        let mut k2 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
-        let mut k3 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
-        let mut k4 = vec![(Vector2::ZERO, Vector2::ZERO); self.particles.len()];
+        let mut k1 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
+        let mut k2 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
+        let mut k3 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
+        let mut k4 = vec![(DVec2::ZERO, DVec2::ZERO); self.particles.len()];
 
         // STEP 1: First evaluation (k1) at the current state
         self.evaluate_derivatives(&mut k1);
@@ -700,7 +696,7 @@ impl Mesh {
             let position_change = k1[i].0 * 1.0 + k2[i].0 * 2.0 + k3[i].0 * 2.0 + k4[i].0 * 1.0;
             let velocity_change = k1[i].1 * 1.0 + k2[i].1 * 2.0 + k3[i].1 * 2.0 + k4[i].1 * 1.0;
 
-            p.velocity = p.velocity + velocity_change * (self.dt / 6.0);
+            p.velocity += velocity_change * (self.dt / 6.0);
             self.portals
                 .move_particle(p, position_change * (self.dt / 6.0));
         }
@@ -720,12 +716,12 @@ impl Mesh {
         }
     }
 
-    fn evaluate_derivatives(&mut self, derivatives: &mut Vec<(Vector2, Vector2)>) {
+    fn evaluate_derivatives(&mut self, derivatives: &mut [(DVec2, DVec2)]) {
         calc_forces(
             &mut self.particles,
             &self.springs,
             &self.portals,
-            self.edge_spring_constant * (self.size as fxx) * (self.size as fxx) / 100.,
+            self.edge_spring_constant * (self.size as f64) * (self.size as f64) / 100.,
             self.damping_coefficient,
         );
 
@@ -742,8 +738,8 @@ impl Mesh {
 
     fn apply_derivatives_half_step(
         &mut self,
-        derivatives: &Vec<(Vector2, Vector2)>,
-        original_states: &Vec<Particle>,
+        derivatives: &[(DVec2, DVec2)],
+        original_states: &[Particle],
     ) {
         let half_dt = self.dt * 0.5;
 
@@ -759,8 +755,8 @@ impl Mesh {
 
     fn apply_derivatives_full_step(
         &mut self,
-        derivatives: &Vec<(Vector2, Vector2)>,
-        original_states: &Vec<Particle>,
+        derivatives: &[(DVec2, DVec2)],
+        original_states: &[Particle],
     ) {
         for i in 0..self.particles.len() {
             let p = &mut self.particles[i];
@@ -772,7 +768,8 @@ impl Mesh {
         }
     }
 
-    fn restore_original_state(&mut self, original_states: &Vec<Particle>) {
+    fn restore_original_state(&mut self, original_states: &[Particle]) {
+        #[allow(clippy::manual_memcpy)]
         for i in 0..self.particles.len() {
             self.particles[i] = original_states[i].clone();
         }
@@ -808,10 +805,10 @@ impl Mesh {
 
     pub fn set_constant(&mut self, name: &str, value: f32) {
         match name {
-            "dt" => self.dt = value as fxx,
-            "edgeSpringConstant" => self.edge_spring_constant = value as fxx,
-            "dampingCoefficient" => self.damping_coefficient = value as fxx,
-            "globalDamping" => self.global_damping = value as fxx,
+            "dt" => self.dt = value as f64,
+            "edgeSpringConstant" => self.edge_spring_constant = value as f64,
+            "dampingCoefficient" => self.damping_coefficient = value as f64,
+            "globalDamping" => self.global_damping = value as f64,
             "draw_reflections" => {
                 self.draw_reflections = value > 0.5;
                 self.update_buffers();
@@ -822,23 +819,23 @@ impl Mesh {
                 self.init();
             }
             "scene_scale" => {
-                self.scale = value as fxx;
+                self.scale = value as f64;
                 self.init();
             }
             "scene_offset_x" => {
-                self.offset_x = value as fxx;
+                self.offset_x = value as f64;
                 self.init();
             }
             "scene_offset_y" => {
-                self.offset_y = value as fxx;
+                self.offset_y = value as f64;
                 self.init();
             }
             "scene_speed_x" => {
-                self.speed_x = value as fxx;
+                self.speed_x = value as f64;
                 self.init();
             }
             "scene_speed_y" => {
-                self.speed_y = value as fxx;
+                self.speed_y = value as f64;
                 self.init();
             }
             "scene_portal_type" => {
@@ -847,27 +844,27 @@ impl Mesh {
             }
 
             "scene_portal1_x" => {
-                self.portal1_x = value as fxx;
+                self.portal1_x = value as f64;
                 self.init();
             }
             "scene_portal1_y" => {
-                self.portal1_y = value as fxx;
+                self.portal1_y = value as f64;
                 self.init();
             }
             "scene_portal1_angle" => {
-                self.portal1_angle = value as fxx;
+                self.portal1_angle = value as f64;
                 self.init();
             }
             "scene_portal2_x" => {
-                self.portal2_x = value as fxx;
+                self.portal2_x = value as f64;
                 self.init();
             }
             "scene_portal2_y" => {
-                self.portal2_y = value as fxx;
+                self.portal2_y = value as f64;
                 self.init();
             }
             "scene_portal2_angle" => {
-                self.portal2_angle = value as fxx;
+                self.portal2_angle = value as f64;
                 self.init();
             }
             "scene_mirror_portals" => {
@@ -1078,6 +1075,12 @@ impl Mesh {
 #[wasm_bindgen]
 pub struct MeshHandle {
     mesh: Mesh,
+}
+
+impl Default for MeshHandle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
