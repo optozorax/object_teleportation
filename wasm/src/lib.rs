@@ -1,8 +1,333 @@
 use glam::Vec3Swizzles;
 use glam::{DMat3, DVec2, DVec3};
+use ordered_float::OrderedFloat;
 use wasm_bindgen::prelude::*;
 
 const PI: f64 = std::f64::consts::PI;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PortalType {
+    Flat,
+    Semicircle { scale_y: f64 },
+    Circle { scale_y: f64 },
+    Perspective { scale_y: f64 },
+    Wormhole { scale_y: f64 },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Portal {
+    pub kind: PortalType,
+    pub portal1: DMat3,
+    pub portal2: DMat3,
+    pub worlds: (usize, usize),
+
+    pub portal1_inv: DMat3,
+    pub portal2_inv: DMat3,
+}
+
+#[derive(Clone)]
+pub struct RayInner {
+    pub o: DVec2,
+    pub d: DVec2,
+}
+
+impl RayInner {
+    pub fn new(o: DVec2, d: DVec2) -> RayInner {
+        RayInner { o, d }
+    }
+
+    pub fn offset(&self, t: f64) -> DVec2 {
+        self.o + self.d * t
+    }
+
+    pub fn normalize(&self) -> RayInner {
+        RayInner {
+            o: self.o,
+            d: self.d.normalize(),
+        }
+    }
+
+    pub fn transform(&self, matrix: &DMat3) -> RayInner {
+        RayInner {
+            o: matrix.transform_point2(self.o),
+            d: matrix.transform_vector2(self.d),
+        }
+    }
+}
+
+fn intersect_ellipse(ray: &RayInner, scale_y: f64) -> Option<f64> {
+    if scale_y <= 0.0 {
+        return None;
+    }
+
+    let o = DVec2::new(ray.o.x, ray.o.y / scale_y);
+    let d = DVec2::new(ray.d.x, ray.d.y / scale_y);
+
+    let a = d.dot(d);
+    if a <= 1e-24 {
+        return None;
+    }
+    let b = 2.0 * o.dot(d);
+    let c = o.dot(o) - 1.0;
+
+    let disc = b * b - 4.0 * a * c;
+    if disc < 0.0 {
+        return None;
+    }
+    let sqrt_disc = disc.sqrt();
+
+    let q = -0.5 * (b + b.signum() * sqrt_disc);
+
+    let mut t0 = q / a;
+    let mut t1 = c / q;
+    if t0 > t1 {
+        std::mem::swap(&mut t0, &mut t1);
+    }
+
+    const EPS: f64 = 1e-12;
+    if t0 >= EPS {
+        Some(t0)
+    } else if t1 >= EPS {
+        Some(t1)
+    } else {
+        None
+    }
+}
+
+fn ray_circle_intersection(ray: &RayInner) -> Option<f64> {
+    let a = ray.d.dot(ray.d);
+    let b = 2.0 * ray.o.dot(ray.d);
+    let c = ray.o.dot(ray.o) - 1.0;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let sqrt_discriminant = discriminant.sqrt();
+    let t1 = (-b - sqrt_discriminant) / (2.0 * a);
+    let t2 = (-b + sqrt_discriminant) / (2.0 * a);
+    if t1 >= 0.0 && t2 >= 0.0 {
+        Some(t1.min(t2))
+    } else if t1 >= 0.0 {
+        Some(t1)
+    } else if t2 >= 0.0 {
+        Some(t2)
+    } else {
+        None
+    }
+}
+
+fn ray_segment_intersection(ray: &RayInner) -> Option<f64> {
+    if ray.d.y.abs() <= 1e-12 {
+        return None;
+    }
+    let t = -ray.o.y / ray.d.y;
+    if t < 1e-12 {
+        return None;
+    }
+    let x = ray.o.x + t * ray.d.x;
+    if (-1.0..=1.0).contains(&x) {
+        Some(t)
+    } else {
+        None
+    }
+}
+
+fn ray_semicircle_intersection(ray: &RayInner) -> Option<f64> {
+    let a = ray.d.dot(ray.d);
+    let b = 2.0 * ray.o.dot(ray.d);
+    let c = ray.o.dot(ray.o) - 1.0;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let sqrt_disc = discriminant.sqrt();
+    let t1 = (-b - sqrt_disc) / (2.0 * a);
+    let t2 = (-b + sqrt_disc) / (2.0 * a);
+    let mut res: Option<f64> = None;
+    for &t in [t1, t2].iter() {
+        if t >= 1e-12 {
+            let p = ray.offset(t);
+            if p.y >= -1e-12 {
+                res = match res {
+                    Some(current) if current <= t => Some(current),
+                    _ => Some(t),
+                };
+            }
+        }
+    }
+    res
+}
+
+fn intersect_semicircle(ray: &RayInner, scale_y: f64) -> Option<f64> {
+    if scale_y == 1.0 {
+        return ray_semicircle_intersection(ray);
+    }
+    if scale_y <= 0.0 {
+        return None;
+    }
+    let scaled_ray = RayInner {
+        o: DVec2::new(ray.o.x, ray.o.y / scale_y),
+        d: DVec2::new(ray.d.x, ray.d.y / scale_y),
+    };
+    ray_semicircle_intersection(&scaled_ray)
+}
+
+fn teleport_position(pos: DVec2, from_inv: &DMat3, to: &DMat3) -> DVec2 {
+    let local = from_inv.transform_point2(pos);
+    to.transform_point2(local)
+}
+
+fn teleport_direction(dir: DVec2, from_inv: &DMat3, to: &DMat3) -> DVec2 {
+    let local = from_inv.transform_vector2(dir);
+    to.transform_vector2(local)
+}
+
+fn circle_invert_ray_direction(ray: &RayInner) -> DVec2 {
+    let p = ray.o;
+    let d = ray.d;
+    let r2 = p.dot(p);
+    if r2 == 0.0 {
+        return d;
+    }
+    let dot = p.dot(d);
+    let num = d * r2 - p * (2.0 * dot);
+    let denom = r2 * r2;
+    let inv = num / denom;
+    let orig_len = d.length();
+    let inv_len = inv.length();
+    if inv_len == 0.0 {
+        DVec2::ZERO
+    } else {
+        inv * (orig_len / inv_len)
+    }
+}
+
+fn ellipse_invert_ray_direction(ray: &RayInner, scale_y: f64) -> DVec2 {
+    if scale_y <= 0.0 {
+        return ray.d;
+    }
+
+    let p = ray.o;
+    let nx = p.x;
+    let ny = p.y / (scale_y * scale_y);
+
+    let mut n = DVec2::new(nx, ny);
+    let n_len = n.length();
+    if n_len == 0.0 {
+        return ray.d;
+    }
+    n /= n_len;
+
+    let dot = ray.d.dot(n);
+    ray.d - n * (2.0 * dot)
+}
+
+pub fn intersect_portal(
+    ray: &RayInner,
+    mut other_directions: Vec<DVec2>,
+    portal: &Portal,
+) -> Option<(bool, f64, RayInner, Vec<DVec2>)> {
+    let local1 = ray.transform(&portal.portal1_inv);
+    let local2 = ray.transform(&portal.portal2_inv);
+
+    let (t1, t2) = match portal.kind {
+        PortalType::Flat => (
+            ray_segment_intersection(&local1),
+            ray_segment_intersection(&local2),
+        ),
+        PortalType::Semicircle { scale_y } => (
+            intersect_semicircle(&local1, scale_y),
+            intersect_semicircle(&local2, scale_y),
+        ),
+        PortalType::Circle { scale_y }
+        | PortalType::Perspective { scale_y }
+        | PortalType::Wormhole { scale_y } => (
+            if scale_y == 1.0 {
+                ray_circle_intersection(&local1)
+            } else {
+                intersect_ellipse(&local1, scale_y)
+            },
+            if scale_y == 1.0 {
+                ray_circle_intersection(&local2)
+            } else {
+                intersect_ellipse(&local2, scale_y)
+            },
+        ),
+    };
+
+    let (first, t_hit, from_inv, to, inv_to) = match (t1, t2) {
+        (Some(t1), Some(t2)) => {
+            if t1 < t2 {
+                (
+                    true,
+                    t1,
+                    &portal.portal1_inv,
+                    &portal.portal2,
+                    &portal.portal2_inv,
+                )
+            } else {
+                (
+                    false,
+                    t2,
+                    &portal.portal2_inv,
+                    &portal.portal1,
+                    &portal.portal1_inv,
+                )
+            }
+        }
+        (Some(t1), None) => (
+            true,
+            t1,
+            &portal.portal1_inv,
+            &portal.portal2,
+            &portal.portal2_inv,
+        ),
+        (None, Some(t2)) => (
+            false,
+            t2,
+            &portal.portal2_inv,
+            &portal.portal1,
+            &portal.portal1_inv,
+        ),
+        (None, None) => return None,
+    };
+
+    let new_pos = teleport_position(ray.offset(t_hit), from_inv, to);
+    let mut new_dir = teleport_direction(ray.d, from_inv, to);
+    other_directions
+        .iter_mut()
+        .for_each(|x| *x = teleport_direction(*x, from_inv, to));
+
+    match portal.kind {
+        PortalType::Wormhole { scale_y } => {
+            let apply = |pos, dir| {
+                let local_ray = RayInner::new(pos, dir).transform(inv_to);
+                let inverted = if scale_y == 1.0 {
+                    circle_invert_ray_direction(&local_ray)
+                } else {
+                    ellipse_invert_ray_direction(&local_ray, scale_y)
+                };
+                to.transform_vector2(inverted)
+            };
+            new_dir = apply(new_pos, new_dir);
+            other_directions
+                .iter_mut()
+                .for_each(|x| *x = apply(new_pos, *x));
+        }
+        PortalType::Perspective { .. } => {
+            new_dir = -new_dir;
+            other_directions.iter_mut().for_each(|x| *x = -*x);
+        }
+        PortalType::Circle { .. } | PortalType::Semicircle { .. } | PortalType::Flat => {}
+    }
+
+    Some((
+        first,
+        t_hit,
+        RayInner::new(new_pos, new_dir),
+        other_directions,
+    ))
+}
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -13,7 +338,7 @@ pub struct Particle {
     pub position: DVec2,
     pub velocity: DVec2,
     pub force: DVec2,
-    pub degree: i8,
+    pub degree: [i8; 5], // max 5 portals
 }
 
 impl Particle {
@@ -22,7 +347,7 @@ impl Particle {
             position: DVec2::new(x, y),
             velocity: DVec2::new(0.0, 0.0),
             force: DVec2::new(0.0, 0.0),
-            degree: 0,
+            degree: [0; 5],
         }
     }
 }
@@ -52,152 +377,6 @@ impl EdgeSpring {
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
-struct Portals {
-    a: DMat3,
-    b: DMat3,
-
-    portal_type: u8,
-
-    a_inv: DMat3,
-    b_inv: DMat3,
-}
-
-fn is_intersects_unit_circle(a: DVec2, b: DVec2) -> bool {
-    let a_dist_sq = a.length_squared();
-    let b_dist_sq = b.length_squared();
-
-    // Check if either endpoint is exactly on the circle
-    if (a_dist_sq - 1.0).abs() < f64::EPSILON || (b_dist_sq - 1.0).abs() < f64::EPSILON {
-        return true;
-    }
-
-    // If both points are inside the circle, no intersection with border
-    if a_dist_sq < 1.0 && b_dist_sq < 1.0 {
-        return false;
-    }
-
-    // If one point is inside and one outside, must cross the border
-    if (a_dist_sq < 1.0) != (b_dist_sq < 1.0) {
-        return true;
-    }
-
-    // Both points are outside the circle
-    // Solve the quadratic equation for line-circle intersection
-    let ab = b - a;
-    let ab_len_sq = ab.length_squared();
-
-    // Handle degenerate case (same point)
-    if ab_len_sq < f64::EPSILON {
-        return false;
-    }
-
-    // Quadratic equation: |a + t(b-a)|² = 1
-    // Expanded: |a|² + 2t⟨a,b-a⟩ + t²|b-a|² = 1
-    // Rearranged: |b-a|²t² + 2⟨a,b-a⟩t + (|a|² - 1) = 0
-    let c = a_dist_sq - 1.0; // constant term
-    let b_coeff = 2.0 * a.dot(ab); // linear coefficient
-    let a_coeff = ab_len_sq; // quadratic coefficient
-
-    let discriminant = b_coeff * b_coeff - 4.0 * a_coeff * c;
-
-    // No real solutions = no intersection
-    if discriminant < 0.0 {
-        return false;
-    }
-
-    // Calculate the two solutions
-    let sqrt_discriminant = discriminant.sqrt();
-    let t1 = (-b_coeff - sqrt_discriminant) / (2.0 * a_coeff);
-    let t2 = (-b_coeff + sqrt_discriminant) / (2.0 * a_coeff);
-
-    // Check if either intersection point lies on the segment [0, 1]
-    (0.0..=1.0).contains(&t1) || (0.0..=1.0).contains(&t2)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_one_endpoint_inside_one_outside() {
-        // One point inside, one outside - must cross border
-        assert!(is_intersects_unit_circle(
-            DVec2::new(0.5, 0.0),
-            DVec2::new(2.0, 0.0)
-        ));
-        assert!(is_intersects_unit_circle(
-            DVec2::new(2.0, 0.0),
-            DVec2::new(0.5, 0.0)
-        ));
-    }
-
-    #[test]
-    fn test_both_endpoints_inside_circle() {
-        // Both points inside circle - no border intersection
-        assert!(!is_intersects_unit_circle(
-            DVec2::new(0.5, 0.0),
-            DVec2::new(0.0, 0.5)
-        ));
-        assert!(!is_intersects_unit_circle(
-            DVec2::new(-0.3, 0.3),
-            DVec2::new(0.2, -0.4)
-        ));
-    }
-
-    #[test]
-    fn test_endpoint_on_circle() {
-        // Point on circle boundary
-        assert!(is_intersects_unit_circle(
-            DVec2::new(1.0, 0.0),
-            DVec2::new(2.0, 0.0)
-        ));
-        assert!(is_intersects_unit_circle(
-            DVec2::new(0.0, 1.0),
-            DVec2::new(0.0, 2.0)
-        ));
-    }
-
-    #[test]
-    fn test_segment_tangent_to_circle() {
-        // Segment tangent to circle (touches border at exactly one point)
-        assert!(is_intersects_unit_circle(
-            DVec2::new(-1.0, 1.0),
-            DVec2::new(1.0, 1.0)
-        ));
-        assert!(is_intersects_unit_circle(
-            DVec2::new(1.0, -1.0),
-            DVec2::new(1.0, 1.0)
-        ));
-    }
-
-    #[test]
-    fn test_segment_crosses_circle_completely() {
-        // Segment passes through circle (enters and exits)
-        assert!(is_intersects_unit_circle(
-            DVec2::new(-2.0, 0.0),
-            DVec2::new(2.0, 0.0)
-        ));
-        assert!(is_intersects_unit_circle(
-            DVec2::new(0.0, -2.0),
-            DVec2::new(0.0, 2.0)
-        ));
-    }
-
-    #[test]
-    fn test_segment_misses_circle() {
-        // Segment completely outside circle, doesn't touch border
-        assert!(!is_intersects_unit_circle(
-            DVec2::new(2.0, 2.0),
-            DVec2::new(3.0, 2.0)
-        ));
-        assert!(!is_intersects_unit_circle(
-            DVec2::new(1.5, 0.0),
-            DVec2::new(2.0, 0.0)
-        ));
-    }
-}
-
 fn reflect_around_unit_circle(pos: DVec2) -> DVec2 {
     let normal = pos.normalize();
     let len = pos.length();
@@ -220,136 +399,149 @@ fn reflect_direction_around_unit_circle(pos: DVec2, dir: DVec2) -> DVec2 {
     reflected.normalize() * dir.length()
 }
 
-impl Portals {
-    fn new(a: DMat3, b: DMat3) -> Portals {
-        Self {
-            a,
-            b,
-            portal_type: 0,
-            a_inv: a.inverse(),
-            b_inv: b.inverse(),
+impl Portal {
+    fn new(a: DMat3, b: DMat3, portal_type: u8) -> Portal {
+        Portal {
+            kind: match portal_type {
+                0 => PortalType::Wormhole { scale_y: 1.0 },
+                1 => PortalType::Perspective { scale_y: 1.0 },
+                2 => PortalType::Circle { scale_y: 1.0 },
+                3 => PortalType::Semicircle { scale_y: 1.0 },
+                4 => PortalType::Flat,
+                _ => unreachable!(),
+            },
+            portal1: a,
+            portal2: b,
+            worlds: (0, 0),
+
+            portal1_inv: a.inverse(),
+            portal2_inv: b.inverse(),
         }
     }
 
     fn get_center1(&self) -> DVec2 {
-        (self.a * DVec3::new(0., 0., 1.)).xy()
+        (self.portal1 * DVec3::new(0., 0., 1.)).xy()
     }
 
     fn get_center2(&self) -> DVec2 {
-        (self.b * DVec3::new(0., 0., 1.)).xy()
+        (self.portal2 * DVec3::new(0., 0., 1.)).xy()
     }
 
     fn get_radius1(&self) -> f64 {
-        (self.a * DVec3::new(1., 0., 0.)).length()
+        (self.portal1 * DVec3::new(1., 0., 0.)).length()
     }
 
     fn get_radius2(&self) -> f64 {
-        (self.b * DVec3::new(1., 0., 0.)).length()
+        (self.portal2 * DVec3::new(1., 0., 0.)).length()
     }
+}
 
-    fn teleport_position(&self, pos: DVec2, mut degree: i8) -> DVec2 {
-        let mut pos = DVec3::from((pos, 1.));
-        loop {
-            if degree == 0 {
-                break;
-            } else if degree > 0 {
+fn teleport_position_full(portal: &Portal, pos: DVec2, mut degree: i8) -> DVec2 {
+    let mut pos = DVec3::from((pos, 1.));
+    loop {
+        if degree == 0 {
+            break;
+        } else {
+            if degree > 0 {
+                pos = portal.portal1_inv * pos;
+            } else {
+                pos = portal.portal2_inv * pos;
+            }
+
+            match portal.kind {
+                PortalType::Wormhole { scale_y } | PortalType::Perspective { scale_y } => {
+                    if scale_y == 1.0 {
+                        pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                    } else {
+                        panic!("Ellipse is not supported");
+                    }
+                }
+                PortalType::Circle { .. } | PortalType::Semicircle { .. } | PortalType::Flat => {}
+            }
+
+            if degree > 0 {
                 degree -= 1;
-                pos = self.a_inv * pos;
-
-                if self.portal_type == 0 || self.portal_type == 1 {
-                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                } else if self.portal_type == 2 {
-                    // nothing
-                }
-
-                pos = self.b * pos;
-            } else if degree < 0 {
+                pos = portal.portal2 * pos;
+            } else {
                 degree += 1;
-                pos = self.b_inv * pos;
-
-                if self.portal_type == 0 || self.portal_type == 1 {
-                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                } else if self.portal_type == 2 {
-                    // nothing
-                }
-
-                pos = self.a * pos;
+                pos = portal.portal1 * pos;
             }
         }
-        pos.xy()
     }
+    pos.xy()
+}
 
-    fn teleport_direction(&self, pos: DVec2, dir: DVec2, mut degree: i8) -> DVec2 {
-        let mut pos = DVec3::from((pos, 1.));
-        let mut dir = DVec3::from((dir, 0.));
-        loop {
-            if degree == 0 {
-                break;
-            } else if degree > 0 {
+fn teleport_direction_full(portal: &Portal, pos: DVec2, dir: DVec2, mut degree: i8) -> DVec2 {
+    let mut pos = DVec3::from((pos, 1.));
+    let mut dir = DVec3::from((dir, 0.));
+    loop {
+        if degree == 0 {
+            break;
+        } else {
+            if degree > 0 {
+                pos = portal.portal1_inv * pos;
+                dir = portal.portal1_inv * dir;
+            } else {
+                pos = portal.portal2_inv * pos;
+                dir = portal.portal2_inv * dir;
+            }
+
+            match portal.kind {
+                PortalType::Wormhole { scale_y } => {
+                    if scale_y == 1.0 {
+                        pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
+                        dir = DVec3::from((
+                            reflect_direction_around_unit_circle(pos.xy(), dir.xy()),
+                            0.,
+                        ));
+                    } else {
+                        panic!("Ellipse is not supported");
+                    }
+                }
+                PortalType::Perspective { scale_y } => {
+                    if scale_y == 1.0 {
+                        dir = -dir;
+                    } else {
+                        panic!("Ellipse is not supported");
+                    }
+                }
+                PortalType::Circle { .. } | PortalType::Semicircle { .. } | PortalType::Flat => {}
+            }
+
+            if degree > 0 {
                 degree -= 1;
-
-                pos = self.a_inv * pos;
-                dir = self.a_inv * dir;
-
-                if self.portal_type == 0 {
-                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir =
-                        DVec3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
-                } else if self.portal_type == 1 {
-                    dir = -dir;
-                } else if self.portal_type == 2 {
-                    // nothing
-                }
-
-                pos = self.b * pos;
-                dir = self.b * dir;
-            } else if degree < 0 {
+                pos = portal.portal2 * pos;
+                dir = portal.portal2 * dir;
+            } else {
                 degree += 1;
-
-                pos = self.b_inv * pos;
-                dir = self.b_inv * dir;
-
-                if self.portal_type == 0 {
-                    pos = DVec3::from((reflect_around_unit_circle(pos.xy()), 1.));
-                    dir =
-                        DVec3::from((reflect_direction_around_unit_circle(pos.xy(), dir.xy()), 0.));
-                } else if self.portal_type == 1 {
-                    dir = -dir;
-                } else if self.portal_type == 2 {
-                    // nothing
-                }
-
-                pos = self.a * pos;
-                dir = self.a * dir;
+                pos = portal.portal1 * pos;
+                dir = portal.portal1 * dir;
             }
         }
-        dir.xy()
     }
+    dir.xy()
+}
 
-    fn is_intersect(&self, prev_pos: DVec2, new_pos: DVec2) -> Option<i8> {
-        let prev_pos: DVec3 = (prev_pos, 1.0).into();
-        let new_pos: DVec3 = (new_pos, 1.0).into();
-        if is_intersects_unit_circle((self.a_inv * prev_pos).xy(), (self.a_inv * new_pos).xy()) {
-            Some(1)
-        } else if is_intersects_unit_circle(
-            (self.b_inv * prev_pos).xy(),
-            (self.b_inv * new_pos).xy(),
-        ) {
-            Some(-1)
-        } else {
-            None
-        }
-    }
+fn move_particle(portals: &[Portal], particle: &mut Particle, offset: DVec2) {
+    let ray = RayInner::new(particle.position, offset);
 
-    fn move_particle(&self, particle: &mut Particle, offset: DVec2) {
-        if let Some(dir) = self.is_intersect(particle.position, particle.position + offset) {
-            particle.velocity =
-                self.teleport_direction(particle.position + offset, particle.velocity, dir);
-            particle.position = self.teleport_position(particle.position + offset, dir);
-            particle.degree += dir;
+    let res = portals
+        .iter()
+        .enumerate()
+        .flat_map(|(i, portal)| Some((i, intersect_portal(&ray, vec![particle.velocity], portal)?)))
+        .filter(|(_, (_, t, _, _))| *t <= 1.0 && *t >= 0.)
+        .min_by_key(|(_, (_, t, _, _))| OrderedFloat(*t));
+
+    if let Some((i, (dir, _, new_ray, velocity))) = res {
+        particle.position = new_ray.o + new_ray.d;
+        particle.velocity = velocity[0];
+        if dir {
+            particle.degree[i] += 1;
         } else {
-            particle.position += offset;
+            particle.degree[i] -= 1;
         }
+    } else {
+        particle.position += offset;
     }
 }
 
@@ -391,7 +583,7 @@ fn spring_force(
 fn calc_forces(
     particles: &mut [Particle],
     springs: &Vec<EdgeSpring>,
-    portals: &Portals,
+    portals: &[Portal],
     edge_k: f64,
     damping: f64,
 ) {
@@ -408,12 +600,27 @@ fn calc_forces(
         let p2 = &particles[spring.j];
 
         if p1.degree != p2.degree {
+            let idx = p1
+                .degree
+                .iter()
+                .zip(p2.degree.iter())
+                .enumerate()
+                .find(|(_, (d1, d2))| d1 != d2)
+                .unwrap()
+                .0;
+            let portal = &portals[idx];
+
             // in p1 local coordinates
             let force1 = spring_force(
                 p1.position,
-                portals.teleport_position(p2.position, p1.degree - p2.degree),
+                teleport_position_full(portal, p2.position, p1.degree[idx] - p2.degree[idx]),
                 p1.velocity,
-                portals.teleport_direction(p2.position, p2.velocity, p1.degree - p2.degree),
+                teleport_direction_full(
+                    portal,
+                    p2.position,
+                    p2.velocity,
+                    p1.degree[idx] - p2.degree[idx],
+                ),
                 spring.rest_length,
                 edge_k,
                 damping,
@@ -421,9 +628,14 @@ fn calc_forces(
 
             // in p2 local coordinates
             let force2 = spring_force(
-                portals.teleport_position(p1.position, p2.degree - p1.degree),
+                teleport_position_full(portal, p1.position, p2.degree[idx] - p1.degree[idx]),
                 p2.position,
-                portals.teleport_direction(p1.position, p1.velocity, p2.degree - p1.degree),
+                teleport_direction_full(
+                    portal,
+                    p1.position,
+                    p1.velocity,
+                    p2.degree[idx] - p1.degree[idx],
+                ),
                 p2.velocity,
                 spring.rest_length,
                 edge_k,
@@ -431,10 +643,20 @@ fn calc_forces(
             );
 
             let force1_avg = (force1
-                + portals.teleport_direction(p2.position, force2, p1.degree - p2.degree))
+                + teleport_direction_full(
+                    portal,
+                    p2.position,
+                    force2,
+                    p1.degree[idx] - p2.degree[idx],
+                ))
                 / 2.;
             let force2_avg = (force2
-                + portals.teleport_direction(p1.position, force1, p2.degree - p1.degree))
+                + teleport_direction_full(
+                    portal,
+                    p1.position,
+                    force1,
+                    p2.degree[idx] - p1.degree[idx],
+                ))
                 / 2.;
 
             particles[spring.i].force += force1_avg;
@@ -464,7 +686,7 @@ fn calc_forces(
 pub struct Mesh {
     particles: Vec<Particle>,
     springs: Vec<EdgeSpring>,
-    portals: Portals,
+    portals: Vec<Portal>,
 
     // Simulation constants
     dt: f64,
@@ -509,7 +731,7 @@ impl Mesh {
         Self {
             particles: Vec::new(),
             springs: Vec::new(),
-            portals: Portals::new(DMat3::IDENTITY, DMat3::IDENTITY),
+            portals: vec![Portal::new(DMat3::IDENTITY, DMat3::IDENTITY, 0)],
 
             dt: 0.01,
             edge_spring_constant: 50.0,
@@ -546,7 +768,7 @@ impl Mesh {
         // Clear existing data
         self.particles.clear();
         self.springs.clear();
-        self.portals = Portals::new(
+        self.portals = vec![Portal::new(
             DMat3::from_scale_angle_translation(
                 DVec2::new(1., 1.),
                 self.portal1_angle * PI,
@@ -561,8 +783,8 @@ impl Mesh {
                 self.portal2_angle * PI,
                 DVec2::new(self.portal2_x, self.portal2_y),
             ),
-        );
-        self.portals.portal_type = self.portal_type;
+            self.portal_type,
+        )];
 
         for i in 0..self.size {
             for j in 0..self.size {
@@ -697,8 +919,7 @@ impl Mesh {
             let velocity_change = k1[i].1 * 1.0 + k2[i].1 * 2.0 + k3[i].1 * 2.0 + k4[i].1 * 1.0;
 
             p.velocity += velocity_change * (self.dt / 6.0);
-            self.portals
-                .move_particle(p, position_change * (self.dt / 6.0));
+            move_particle(&self.portals, p, position_change * (self.dt / 6.0));
         }
 
         let spring_die_factor = 4.;
@@ -748,8 +969,8 @@ impl Mesh {
             let original = &original_states[i];
 
             p.velocity = original.velocity + derivatives[i].1 * half_dt;
-            p.position += derivatives[i].0 * half_dt;
-            // self.portals.move_particle(p, derivatives[i].0 * half_dt);
+            move_particle(&self.portals, p, derivatives[i].0 * half_dt);
+            // p.position += derivatives[i].0 * half_dt;
         }
     }
 
@@ -763,8 +984,8 @@ impl Mesh {
             let original = &original_states[i];
 
             p.velocity = original.velocity + derivatives[i].1 * self.dt;
-            p.position += derivatives[i].0 * self.dt;
-            // self.portals.move_particle(p, derivatives[i].0 * self.dt);
+            move_particle(&self.portals, p, derivatives[i].0 * self.dt);
+            // p.position += derivatives[i].0 * self.dt;
         }
     }
 
@@ -885,13 +1106,13 @@ impl Mesh {
 
         if self.draw_reflections {
             for p in &self.particles {
-                let new_pos = self.portals.teleport_position(p.position, -1);
+                let new_pos = teleport_position_full(&self.portals[0], p.position, -1);
                 self.particles_buffer.push(new_pos.x as f32);
                 self.particles_buffer.push(new_pos.y as f32);
             }
 
             for p in &self.particles {
-                let new_pos = self.portals.teleport_position(p.position, 1);
+                let new_pos = teleport_position_full(&self.portals[0], p.position, 1);
                 self.particles_buffer.push(new_pos.x as f32);
                 self.particles_buffer.push(new_pos.y as f32);
             }
@@ -905,11 +1126,13 @@ impl Mesh {
 
         if self.draw_reflections {
             for spring in &self.springs {
-                if self.particles[spring.i].degree + 1 == self.particles[spring.j].degree {
+                if self.particles[spring.i].degree[0] + 1 == self.particles[spring.j].degree[0] {
                     self.lines_buffer.push(spring.i as u32);
                     self.lines_buffer
                         .push(self.particles.len() as u32 + spring.j as u32);
-                } else if self.particles[spring.i].degree == self.particles[spring.j].degree + 1 {
+                } else if self.particles[spring.i].degree[0]
+                    == self.particles[spring.j].degree[0] + 1
+                {
                     self.lines_buffer
                         .push(self.particles.len() as u32 + spring.i as u32);
                     self.lines_buffer.push(spring.j as u32);
@@ -922,11 +1145,13 @@ impl Mesh {
             }
 
             for spring in &self.springs {
-                if self.particles[spring.i].degree + 1 == self.particles[spring.j].degree {
+                if self.particles[spring.i].degree[0] + 1 == self.particles[spring.j].degree[0] {
                     self.lines_buffer
                         .push(self.particles.len() as u32 * 2 + spring.i as u32);
                     self.lines_buffer.push(spring.j as u32);
-                } else if self.particles[spring.i].degree == self.particles[spring.j].degree + 1 {
+                } else if self.particles[spring.i].degree[0]
+                    == self.particles[spring.j].degree[0] + 1
+                {
                     self.lines_buffer.push(spring.i as u32);
                     self.lines_buffer
                         .push(self.particles.len() as u32 * 2 + spring.j as u32);
@@ -951,8 +1176,9 @@ impl Mesh {
         if self.draw_reflections {
             for spring in &self.springs {
                 self.disable_lines_buffer.push(
-                    (if self.particles[spring.i].degree != self.particles[spring.j].degree {
-                        (self.particles[spring.i].degree - self.particles[spring.j].degree).abs()
+                    (if self.particles[spring.i].degree[0] != self.particles[spring.j].degree[0] {
+                        (self.particles[spring.i].degree[0] - self.particles[spring.j].degree[0])
+                            .abs()
                             != 1
                     } else {
                         false
@@ -964,8 +1190,9 @@ impl Mesh {
 
             for spring in &self.springs {
                 self.disable_lines_buffer.push(
-                    (if self.particles[spring.i].degree != self.particles[spring.j].degree {
-                        (self.particles[spring.i].degree - self.particles[spring.j].degree).abs()
+                    (if self.particles[spring.i].degree[0] != self.particles[spring.j].degree[0] {
+                        (self.particles[spring.i].degree[0] - self.particles[spring.j].degree[0])
+                            .abs()
                             != 1
                     } else {
                         false
@@ -977,23 +1204,29 @@ impl Mesh {
         }
 
         self.circle1data.clear();
-        self.circle1data.push(self.portals.get_center1().x as f32);
-        self.circle1data.push(self.portals.get_center1().y as f32);
-        self.circle1data.push(self.portals.get_radius1() as f32);
+        self.circle1data
+            .push(self.portals[0].get_center1().x as f32);
+        self.circle1data
+            .push(self.portals[0].get_center1().y as f32);
+        self.circle1data.push(self.portals[0].get_radius1() as f32);
 
         self.circle2data.clear();
-        self.circle2data.push(self.portals.get_center2().x as f32);
-        self.circle2data.push(self.portals.get_center2().y as f32);
-        self.circle2data.push(self.portals.get_radius2() as f32);
+        self.circle2data
+            .push(self.portals[0].get_center2().x as f32);
+        self.circle2data
+            .push(self.portals[0].get_center2().y as f32);
+        self.circle2data.push(self.portals[0].get_radius2() as f32);
 
         self.circle1data_teleported.clear();
-        let center1 = self.portals.get_center1();
-        let radius1_teleported = self.portals.teleport_position(
-            center1 + center1.normalize() * self.portals.get_radius1(),
+        let center1 = self.portals[0].get_center1();
+        let radius1_teleported = teleport_position_full(
+            &self.portals[0],
+            center1 + center1.normalize() * self.portals[0].get_radius1(),
             -1,
         );
-        let radius1_teleported2 = self.portals.teleport_position(
-            center1 - center1.normalize() * self.portals.get_radius1(),
+        let radius1_teleported2 = teleport_position_full(
+            &self.portals[0],
+            center1 - center1.normalize() * self.portals[0].get_radius1(),
             -1,
         );
         let center1_teleported = (radius1_teleported + radius1_teleported2) / 2.;
@@ -1005,13 +1238,15 @@ impl Mesh {
             .push((radius1_teleported - radius1_teleported2).length() as f32 / 2.);
 
         self.circle2data_teleported.clear();
-        let center2 = self.portals.get_center2();
-        let radius2_teleported = self.portals.teleport_position(
-            center2 + center2.normalize() * self.portals.get_radius2(),
+        let center2 = self.portals[0].get_center2();
+        let radius2_teleported = teleport_position_full(
+            &self.portals[0],
+            center2 + center2.normalize() * self.portals[0].get_radius2(),
             1,
         );
-        let radius2_teleported2 = self.portals.teleport_position(
-            center2 - center2.normalize() * self.portals.get_radius2(),
+        let radius2_teleported2 = teleport_position_full(
+            &self.portals[0],
+            center2 - center2.normalize() * self.portals[0].get_radius2(),
             1,
         );
         let center2_teleported = (radius2_teleported + radius2_teleported2) / 2.;
